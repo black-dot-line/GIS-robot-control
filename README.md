@@ -1,2 +1,2 @@
 # GIS-robot-control
-controller code for GIS inwall climbinmg robot
+controller code for GIS inwall climbing robot
