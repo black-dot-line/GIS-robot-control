@@ -1,0 +1,5263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>GIS 机器人实时监控画面</title>
+  <style>
+    :root {
+      --bg: #000000;
+      --panel: #10151b;
+      --line: rgba(0, 255, 170, 0.18);
+      --text: #e8f3ef;
+      --muted: #97a7a0;
+      --green: #00e68a;
+      --green-2: #18f0a1;
+      --danger: #d92f2f;
+      --danger-hover: #ef3d3d;
+      --btn: #4f5359;
+      --btn-hover: #656a72;
+      --blue: #2a68ff;
+      --blue-hover: #3f7bff;
+      --shadow: 0 0 0 1px rgba(0,255,170,0.06), 0 10px 30px rgba(0,0,0,0.28);
+
+      --manual-mode-color: #1eaa67;
+      --manual-mode-hover: #26c176;
+      --manual-mode-active: #188a55;
+
+      --auto-mode-color: #2a68ff;
+      --auto-mode-hover: #3f7bff;
+      --auto-mode-active: #2157d8;
+
+      --control-mode-color: #1eaa67;
+      --control-mode-hover: #26c176;
+      --control-mode-active: #188a55;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      touch-action: manipulation;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    body {
+      padding: 6px;
+    }
+
+    button, input, select {
+      font-family: inherit;
+      border-radius: 0 !important;
+    }
+
+    input {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+
+    .page {
+      width: 100%;
+      height: calc(100vh - 12px);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at top, rgba(0,255,170,0.05), transparent 26%),
+        #05080d;
+      border: 1px solid rgba(255,255,255,0.04);
+    }
+
+    .layout {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 2.16fr 0.84fr;
+      gap: 12px;
+      align-items: stretch;
+      overflow: hidden;
+    }
+
+    .left-col, .right-col {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: hidden;
+    }
+
+    .panel {
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      font-size: 15px;
+      font-weight: 700;
+      background: rgba(255,255,255,0.015);
+      line-height: 1;
+      flex: 0 0 auto;
+    }
+
+    .panel-header::before {
+      content: "";
+      width: 11px;
+      height: 11px;
+      border: 2px solid var(--green);
+      border-radius: 50%;
+      box-shadow: 0 0 8px rgba(0,230,138,0.6);
+      flex: 0 0 auto;
+    }
+
+    .video-panel {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .video-box {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 10px;
+    }
+
+    .video-frame {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .video-feed {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+      border: none;
+      object-fit: contain;
+      object-position: center center;
+    }
+
+    .video-fallback {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+    }
+
+    .video-fallback.active {
+      display: block;
+    }
+
+    .detection-overlay {
+               position: absolute;
+               inset: 0;
+               width: 100%;
+               height: 100%;
+               z-index: 2;
+               pointer-events: none;
+               background: transparent;
+           }
+
+           .stream-status {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      padding: 6px 10px;
+      background: rgba(20, 27, 35, 0.82);
+      border: 1px solid rgba(0,255,170,0.16);
+      color: var(--green-2);
+      font-size: 13px;
+      letter-spacing: 0.5px;
+      z-index: 3;
+      max-width: 60%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .datetime {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      padding: 6px 10px;
+      background: rgba(20, 27, 35, 0.82);
+      border: 1px solid rgba(0,255,170,0.16);
+      color: var(--green-2);
+      font-size: 13px;
+      letter-spacing: 0.5px;
+      z-index: 3;
+    }
+
+    .fullscreen-btn {
+      position: absolute;
+      right: 14px;
+      bottom: 14px;
+      width: 46px;
+      height: 46px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(20, 27, 35, 0.78);
+      color: #ffffff;
+      cursor: pointer;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: 0.15s ease;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.24);
+    }
+
+    .fullscreen-btn:hover {
+      background: rgba(32, 42, 54, 0.92);
+      border-color: rgba(0,255,170,0.3);
+    }
+
+    .fullscreen-btn svg {
+      width: 24px;
+      height: 24px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .button-row {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+      flex: 0 0 auto;
+    }
+
+    .feature-btn {
+      height: 48px;
+      border: none;
+      background: var(--btn);
+      color: #d7d7d7;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.15s ease;
+    }
+
+    .feature-btn:hover { background: var(--btn-hover); }
+
+    .feature-btn.primary {
+      background: #1eaa67;
+      color: #fff;
+    }
+
+    .feature-btn.primary:hover {
+      background: #26c176;
+    }
+
+    .feature-btn.recording,
+    .feature-btn.active-danger {
+      background: #a92e2e;
+      color: #fff;
+    }
+
+    .feature-btn.recording:hover,
+    .feature-btn.active-danger:hover {
+      background: #c63b3b;
+    }
+
+    .feature-btn.active-auto {
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .feature-btn.active-auto:hover {
+      background: var(--blue-hover);
+    }
+
+    .feature-btn.mode-toggle-btn {
+      background: var(--control-mode-color);
+      color: #fff;
+    }
+
+    .feature-btn.mode-toggle-btn:hover {
+      background: var(--control-mode-hover);
+    }
+
+    .right-stack {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto auto auto;
+      gap: 12px;
+      align-content: start;
+      overflow: visible;
+    }
+
+    .control-panel {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: visible;
+    }
+
+    .control-body {
+      padding: 8px 12px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #dcebe5;
+      margin-bottom: 2px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      line-height: 1.1;
+      flex: 0 0 auto;
+    }
+
+    .robot-toggle-btn {
+      width: 72%;
+      max-width: 100%;
+      height: 46px;
+      margin: 0 auto;
+      border: none;
+      background: #69d65a;
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.15s ease;
+      flex: 0 0 auto;
+    }
+
+    .robot-toggle-btn:hover {
+      filter: brightness(1.05);
+    }
+
+    .robot-toggle-btn.running {
+      background: #be3232;
+    }
+
+    .ctrl-group {
+      background: transparent;
+      border: none;
+      padding: 0;
+      flex: 0 0 auto;
+    }
+
+    .speed-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .speed-readout {
+      font-size: 14px;
+      color: #d8e9e1;
+      line-height: 1.2;
+    }
+
+    .speed-readout .value {
+      color: var(--green-2);
+      font-size: 18px;
+      font-weight: 700;
+      margin-left: 4px;
+      margin-right: 4px;
+    }
+
+    .speed-input-wrap {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: #efefef;
+      color: #222;
+      height: 34px;
+      padding: 0 8px;
+      min-width: 110px;
+      flex: 0 0 auto;
+    }
+
+    .speed-input {
+      width: 58px;
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 14px;
+      color: #111;
+      text-align: center;
+    }
+
+    .speed-unit {
+      color: #111;
+      font-size: 14px;
+      margin-left: 4px;
+    }
+
+    .speed-scale {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+      line-height: 1;
+      flex: 0 0 auto;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--green);
+      cursor: pointer;
+      margin: 0;
+      flex: 0 0 auto;
+    }
+
+    .move-group {
+      flex: 0 0 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: visible;
+    }
+
+    .move-pad-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: visible;
+      padding: 2px 0 0;
+    }
+
+    .move-pad {
+      display: grid;
+      align-items: center;
+      justify-items: center;
+      justify-content: center;
+    }
+
+    .move-pad.manual-layout {
+      grid-template-columns: 86px 86px 86px;
+      grid-template-rows: 46px 46px;
+      grid-template-areas:
+        ". forward ."
+        "left backward right";
+      column-gap: 12px;
+      row-gap: 8px;
+    }
+
+    .move-pad.auto-layout {
+      grid-template-columns: 86px 86px 86px;
+      grid-template-rows: 46px;
+      grid-template-areas: "forward stop backward";
+      column-gap: 12px;
+      row-gap: 0;
+    }
+
+    .move-btn {
+      width: 86px;
+      height: 46px;
+      border: none;
+      background: var(--btn);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+      transition: background 0.12s ease, opacity 0.12s ease;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 10px rgba(0,0,0,0.18);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 4px;
+    }
+
+    .move-btn:hover { background: var(--btn-hover); }
+
+    .move-btn:active,
+    .move-btn.holding {
+      background: #43484f;
+      opacity: 0.95;
+    }
+
+    .move-btn.mode-enabled {
+      background: var(--control-mode-color);
+      color: #fff;
+    }
+
+    .move-btn.mode-enabled:hover {
+      background: var(--control-mode-hover);
+    }
+
+    .move-btn.mode-enabled:active,
+    .move-btn.mode-enabled.holding {
+      background: var(--control-mode-active);
+      opacity: 0.98;
+    }
+
+    .move-btn .inline-label {
+      display: inline-block;
+      font-size: 13px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .move-btn.forward { grid-area: forward; }
+    .move-btn.left { grid-area: left; }
+    .move-btn.stop { grid-area: stop; }
+    .move-btn.right { grid-area: right; }
+    .move-btn.backward { grid-area: backward; }
+
+    .move-btn.is-hidden {
+      display: none !important;
+    }
+
+    .fan-panel {
+      height: auto;
+      min-height: 0;
+    }
+
+    .fan-panel .control-body {
+      justify-content: center;
+      overflow: visible;
+      padding-top: 14px;
+      padding-bottom: 14px;
+    }
+
+    .fan-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      margin: 0;
+      width: 100%;
+    }
+
+    .fan-status {
+      font-size: 14px;
+      color: #d8e9e1;
+      line-height: 1.2;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .fan-status .value {
+      display: inline-block;
+      min-width: 2ch;
+      text-align: right;
+      color: var(--green-2);
+      font-size: 18px;
+      font-weight: 700;
+      margin-left: 4px;
+    }
+
+    .fan-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: nowrap;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .mini-btn {
+      min-width: 58px;
+      height: 34px;
+      border: none;
+      background: var(--btn);
+      color: #fff;
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 3px 8px rgba(0,0,0,0.18);
+      transition: 0.15s ease;
+    }
+
+    .mini-btn:hover {
+      background: var(--btn-hover);
+    }
+
+    .reset-btn {
+      min-width: 64px;
+      height: 34px;
+      border: none;
+      background: var(--blue);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.15s ease;
+    }
+
+    .reset-btn:hover {
+      background: var(--blue-hover);
+    }
+
+
+
+    /* =========================
+       G1 云台紧凑控制界面
+       ========================= */
+
+    /* 右侧内容超出可视高度时使用内部滚动，避免面板彼此覆盖。 */
+    .right-stack {
+      grid-template-rows: auto auto auto auto !important;
+      align-content: start;
+      overflow-x: hidden !important;
+      overflow-y: auto !important;
+      padding-right: 2px;
+    }
+
+    .camera-panel {
+      flex: 0 0 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .camera-panel .panel-header {
+      min-height: 40px;
+      justify-content: space-between;
+      padding: 9px 12px 8px;
+    }
+
+    .gimbal-link-state {
+      margin-left: auto;
+      padding: 4px 8px;
+      border: 1px solid rgba(0, 230, 138, 0.28);
+      background: rgba(0, 230, 138, 0.08);
+      color: var(--green-2);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .gimbal-link-state[data-state="warning"] {
+      border-color: rgba(255, 196, 64, 0.45);
+      background: rgba(255, 196, 64, 0.10);
+      color: #ffd56a;
+    }
+
+    .gimbal-link-state[data-state="error"] {
+      border-color: rgba(239, 61, 61, 0.48);
+      background: rgba(239, 61, 61, 0.10);
+      color: #ff7777;
+    }
+
+    .gimbal-link-state[data-state="checking"],
+    .gimbal-link-state[data-state="connected"] {
+      border-color: rgba(42, 104, 255, 0.42);
+      background: rgba(42, 104, 255, 0.10);
+      color: #8fb0ff;
+    }
+
+    .camera-panel .control-body,
+    .gimbal-control-body {
+      padding: 8px 10px 10px;
+      gap: 7px;
+      overflow: hidden;
+    }
+
+    /* 三个姿态角改为一行紧凑显示。 */
+    .gimbal-pose-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+      flex: 0 0 auto;
+    }
+
+    .gimbal-pose-card {
+      min-width: 0;
+      height: 31px;
+      padding: 0 6px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.025);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .gimbal-pose-card .axis-name {
+      display: inline;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .gimbal-pose-card .axis-value {
+      display: inline;
+      margin: 0;
+      color: var(--green-2);
+      font-size: 15px;
+      font-weight: 800;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .gimbal-pose-card .axis-unit {
+      color: #cfe0d9;
+      font-size: 10px;
+      margin-left: -2px;
+    }
+
+    /* 航向、俯仰、横滚统一放入一个三乘三控制区。 */
+    .gimbal-control-zone {
+      display: block;
+      flex: 0 0 auto;
+    }
+
+    .gimbal-dpad {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-rows: repeat(3, 35px);
+      grid-template-areas:
+        "roll-left pitch-up roll-right"
+        "yaw-left stop yaw-right"
+        ". pitch-down .";
+      gap: 5px;
+      padding: 6px;
+      border: 1px solid rgba(255,255,255,0.09);
+      background: rgba(0,0,0,0.16);
+    }
+
+    .gimbal-jog-btn,
+    .gimbal-stop-btn,
+    .gimbal-action-btn {
+      min-width: 0;
+      min-height: 0;
+      border: none;
+      color: #fff;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      transition: background 0.12s ease, transform 0.08s ease, opacity 0.12s ease;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 3px 8px rgba(0,0,0,0.18);
+      padding: 0 4px;
+      white-space: nowrap;
+    }
+
+    .gimbal-jog-btn {
+      background: var(--btn);
+    }
+
+    .gimbal-jog-btn:hover {
+      background: var(--btn-hover);
+    }
+
+    .gimbal-jog-btn:active,
+    .gimbal-jog-btn.holding {
+      background: var(--manual-mode-active);
+      transform: translateY(1px);
+    }
+
+    .gimbal-jog-btn.roll-left { grid-area: roll-left; }
+    .gimbal-jog-btn.roll-right { grid-area: roll-right; }
+    .gimbal-jog-btn.pitch-up { grid-area: pitch-up; }
+    .gimbal-jog-btn.pitch-down { grid-area: pitch-down; }
+    .gimbal-jog-btn.yaw-left { grid-area: yaw-left; }
+    .gimbal-jog-btn.yaw-right { grid-area: yaw-right; }
+
+    .gimbal-stop-btn {
+      grid-area: stop;
+      background: #9c3030;
+      letter-spacing: 0.3px;
+    }
+
+    .gimbal-stop-btn:hover {
+      background: #bd3b3b;
+    }
+
+    /* 速度与横滚步进合并为一行。 */
+    .gimbal-tuning-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 112px;
+      gap: 6px;
+      align-items: stretch;
+      flex: 0 0 auto;
+    }
+
+    .gimbal-tuning-card {
+      min-width: 0;
+      height: 34px;
+      padding: 4px 6px;
+      border: 1px solid rgba(255,255,255,0.09);
+      background: rgba(255,255,255,0.025);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gimbal-tuning-head {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 0;
+      color: #d8e9e1;
+      font-size: 10px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .gimbal-speed-input {
+      width: 38px;
+      height: 23px;
+      padding: 0 3px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: #eeeeee;
+      color: #111;
+      text-align: center;
+      font-size: 11px;
+      outline: none;
+    }
+
+    .gimbal-speed-range {
+      min-width: 40px;
+      flex: 1 1 auto;
+      margin: 0;
+      accent-color: var(--green);
+    }
+
+    .gimbal-roll-step-select {
+      width: 100%;
+      height: 24px;
+      margin: 0;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: #eeeeee;
+      color: #111;
+      font-size: 10px;
+      text-align: center;
+      outline: none;
+    }
+
+    /* 只保留姿态读取与初始位姿恢复，停止按钮位于方向区中心。 */
+    .gimbal-action-row {
+      display: grid;
+      grid-template-columns: 0.8fr 1.2fr;
+      gap: 6px;
+      flex: 0 0 auto;
+    }
+
+    .gimbal-action-btn {
+      height: 33px;
+      background: var(--btn);
+    }
+
+    .gimbal-action-btn:hover {
+      background: var(--btn-hover);
+    }
+
+    .gimbal-action-btn.home {
+      background: var(--blue);
+    }
+
+    .gimbal-action-btn.home:hover {
+      background: var(--blue-hover);
+    }
+
+    /* 状态信息不再额外占用布局高度。 */
+    .gimbal-ui-status {
+      display: none !important;
+    }
+
+    @media (max-width: 980px) {
+      .camera-panel .control-body,
+      .gimbal-control-body {
+        padding: 7px 9px 9px;
+        gap: 6px;
+      }
+
+      .gimbal-dpad {
+        grid-template-rows: repeat(3, 34px);
+      }
+
+      .gimbal-pose-card .axis-name {
+        font-size: 9px;
+      }
+
+      .gimbal-pose-card .axis-value {
+        font-size: 14px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .right-stack {
+        overflow-y: auto !important;
+      }
+
+      .gimbal-tuning-row {
+        grid-template-columns: minmax(0, 1fr) 104px;
+      }
+
+      .gimbal-action-row {
+        grid-template-columns: 1fr 1.25fr;
+      }
+    }
+
+
+    .shutdown-panel {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      overflow: visible;
+      padding-top: 2px;
+    }
+
+    .shutdown-btn {
+      width: 72%;
+      min-width: 220px;
+      max-width: 320px;
+      height: 52px;
+      display: block;
+      margin: 0 auto;
+      border: none;
+      background: var(--danger);
+      color: white;
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.15s ease;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.26);
+    }
+
+    .shutdown-btn:hover { background: var(--danger-hover); }
+
+    @media (max-width: 1280px) {
+      .layout {
+        grid-template-columns: 2.05fr 0.95fr;
+      }
+
+      .right-stack {
+        grid-template-rows: minmax(405px, 1.4fr) auto minmax(220px, 0.92fr) auto;
+      }
+
+      .move-pad.manual-layout {
+        grid-template-columns: 80px 80px 80px;
+        grid-template-rows: 44px 44px;
+        column-gap: 10px;
+        row-gap: 8px;
+      }
+
+      .move-pad.auto-layout {
+        grid-template-columns: 80px 80px 80px;
+        grid-template-rows: 44px;
+        column-gap: 10px;
+        row-gap: 0;
+      }
+
+      .move-btn {
+        width: 80px;
+        height: 44px;
+      }
+    }
+
+    @media (max-width: 980px) {
+      body {
+        padding: 4px;
+      }
+
+      .page {
+        height: calc(100vh - 8px);
+        padding: 6px;
+      }
+
+      .layout {
+        grid-template-columns: 1.6fr 1fr;
+        gap: 8px;
+      }
+
+      .left-col, .right-col {
+        gap: 8px;
+      }
+
+      .right-stack {
+        gap: 8px;
+        grid-template-rows: minmax(390px, 1.32fr) auto minmax(210px, 0.92fr) auto;
+      }
+
+      .panel-header {
+        padding: 10px 12px 9px;
+        font-size: 14px;
+      }
+
+      .control-body {
+        padding: 9px 12px 10px;
+        gap: 8px;
+      }
+
+      .robot-toggle-btn {
+        height: 42px;
+      }
+
+      .move-pad.manual-layout {
+        grid-template-columns: 72px 72px 72px;
+        grid-template-rows: 42px 42px;
+        column-gap: 8px;
+        row-gap: 6px;
+      }
+
+      .move-pad.auto-layout {
+        grid-template-columns: 72px 72px 72px;
+        grid-template-rows: 42px;
+        column-gap: 8px;
+        row-gap: 0;
+      }
+
+      .move-btn {
+        width: 72px;
+        height: 42px;
+      }
+
+      .move-btn .inline-label {
+        font-size: 12px;
+      }
+
+      .button-row {
+        gap: 6px;
+      }
+
+      .feature-btn {
+        height: 44px;
+        font-size: 14px;
+      }
+
+      .camera-grid {
+        grid-template-columns: 48px 1fr 1fr 48px;
+        gap: 6px;
+      }
+
+      .cam-hold-btn {
+        width: 48px;
+        height: 48px;
+      }
+
+      .ctrl-btn {
+        font-size: 14px;
+      }
+
+      .shutdown-btn {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .right-stack {
+        grid-template-rows: auto auto auto auto;
+      }
+
+      .video-frame {
+        min-height: 320px;
+      }
+
+      .button-row {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .move-pad.manual-layout {
+        grid-template-columns: 74px 74px 74px;
+        grid-template-rows: 42px 42px;
+        column-gap: 8px;
+        row-gap: 6px;
+      }
+
+      .move-pad.auto-layout {
+        grid-template-columns: 74px 74px 74px;
+        grid-template-rows: 42px;
+        column-gap: 8px;
+        row-gap: 0;
+      }
+
+      .move-btn {
+        width: 74px;
+        height: 42px;
+      }
+    }
+
+    /* =========================================================
+       最终紧凑布局覆盖：保证机器人、风扇、云台、关机区域不重叠
+       ========================================================= */
+
+    .right-col {
+      min-height: 0;
+      overflow: hidden !important;
+    }
+
+    .right-stack {
+      min-height: 0;
+      gap: 7px !important;
+      grid-template-rows: auto auto auto auto !important;
+      align-content: start !important;
+      overflow-x: hidden !important;
+      overflow-y: auto !important;
+      scrollbar-gutter: stable;
+      padding-right: 3px;
+    }
+
+    .right-stack > * {
+      position: relative;
+      flex: 0 0 auto;
+      min-width: 0;
+      z-index: auto;
+    }
+
+    .robot-panel,
+    .fan-panel,
+    .camera-panel,
+    .shutdown-panel {
+      overflow: hidden !important;
+    }
+
+    .robot-panel .panel-header,
+    .fan-panel .panel-header,
+    .camera-panel .panel-header {
+      min-height: 35px;
+      padding: 7px 10px 6px;
+      font-size: 14px;
+    }
+
+    /* ---------- 机器人运动控制压缩 ---------- */
+
+    .robot-panel .control-body {
+      padding: 6px 9px 7px;
+      gap: 4px;
+      overflow: hidden;
+    }
+
+    .robot-panel .robot-toggle-btn {
+      width: 68%;
+      height: 34px;
+      margin: 0 auto 1px;
+      font-size: 13px;
+    }
+
+    .robot-panel .section-title {
+      margin: 0;
+      padding: 0 0 3px;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .robot-panel .speed-header {
+      flex-wrap: nowrap;
+      gap: 6px;
+      margin-bottom: 3px;
+    }
+
+    .robot-panel .speed-readout {
+      min-width: 0;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .robot-panel .speed-readout .value {
+      margin: 0 2px;
+      font-size: 15px;
+    }
+
+    .robot-panel .speed-input-wrap {
+      min-width: 91px;
+      height: 27px;
+      padding: 0 5px;
+    }
+
+    .robot-panel .speed-input {
+      width: 46px;
+      font-size: 12px;
+    }
+
+    .robot-panel .speed-unit {
+      margin-left: 2px;
+      font-size: 11px;
+    }
+
+    .robot-panel input[type="range"] {
+      height: 13px;
+    }
+
+    .robot-panel .speed-scale {
+      margin-top: 1px;
+      font-size: 10px;
+    }
+
+    .robot-panel .move-group {
+      overflow: hidden;
+    }
+
+    .robot-panel .move-pad-wrap {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .robot-panel .move-pad.manual-layout {
+      grid-template-columns: repeat(3, 70px);
+      grid-template-rows: 32px 32px;
+      column-gap: 6px;
+      row-gap: 5px;
+    }
+
+    .robot-panel .move-pad.auto-layout {
+      grid-template-columns: repeat(3, 70px);
+      grid-template-rows: 32px;
+      column-gap: 6px;
+    }
+
+    .robot-panel .move-btn {
+      width: 70px;
+      height: 32px;
+      padding: 0 3px;
+      font-size: 11px;
+    }
+
+    .robot-panel .move-btn .inline-label {
+      font-size: 11px;
+    }
+
+    /* ---------- 风扇区域压缩 ---------- */
+
+    .fan-panel .control-body {
+      padding: 7px 10px;
+      gap: 0;
+    }
+
+    .fan-panel .fan-row {
+      gap: 8px;
+    }
+
+    .fan-panel .fan-status {
+      font-size: 12px;
+    }
+
+    .fan-panel .fan-status .value {
+      font-size: 16px;
+    }
+
+    .fan-panel .fan-actions {
+      gap: 6px;
+    }
+
+    .fan-panel .mini-btn {
+      min-width: 48px;
+      height: 30px;
+      font-size: 18px;
+    }
+
+    .fan-panel .reset-btn {
+      min-width: 56px;
+      height: 30px;
+      font-size: 12px;
+    }
+
+    /* ---------- 云台紧凑布局 ---------- */
+
+    .gimbal-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow: hidden;
+    }
+
+    .gimbal-panel-header > span:first-child {
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .gimbal-header-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex: 0 0 auto;
+    }
+
+    .gimbal-link-state {
+      padding: 3px 6px;
+      font-size: 12px;
+    }
+
+    .gimbal-header-reset {
+      height: 24px;
+      padding: 0 8px;
+      border: none;
+      background: var(--blue);
+      color: #fff;
+      font-family: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .gimbal-header-reset:hover {
+      background: var(--blue-hover);
+    }
+
+    .camera-panel .gimbal-control-body {
+      padding: 6px 9px 7px;
+      gap: 5px;
+      overflow: hidden;
+    }
+
+    .gimbal-pose-strip {
+      gap: 4px;
+    }
+
+    .gimbal-pose-card {
+      height: 27px;
+      padding: 0 4px;
+      gap: 3px;
+    }
+
+    .gimbal-pose-card .axis-name {
+      font-size: 9px;
+    }
+
+    .gimbal-pose-card .axis-value {
+      font-size: 13px;
+    }
+
+    .gimbal-pose-card .axis-unit {
+      font-size: 9px;
+    }
+
+    .gimbal-dpad {
+      grid-template-rows: repeat(3, 31px);
+      gap: 4px;
+      padding: 5px;
+    }
+
+    .gimbal-jog-btn,
+    .gimbal-stop-btn {
+      font-size: 11px;
+      padding: 0 3px;
+    }
+
+    .gimbal-settings-row {
+      display: grid;
+      grid-template-columns: minmax(155px, 1fr) 103px 70px;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .gimbal-speed-compact,
+    .gimbal-roll-compact {
+      height: 31px;
+      min-width: 0;
+      padding: 3px 5px;
+      border: 1px solid rgba(255,255,255,0.09);
+      background: rgba(255,255,255,0.025);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .gimbal-speed-compact label,
+    .gimbal-roll-compact label {
+      flex: 0 0 auto;
+      color: #d8e9e1;
+      font-size: 9px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .gimbal-speed-input {
+      box-sizing: border-box;
+      width: 52px !important;
+      min-width: 52px !important;
+      height: 23px;
+      padding: 0 4px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: #efefef;
+      color: #111;
+      text-align: center;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      appearance: textfield;
+      -moz-appearance: textfield;
+    }
+
+    .gimbal-speed-input::-webkit-outer-spin-button,
+    .gimbal-speed-input::-webkit-inner-spin-button {
+      margin: 0;
+      -webkit-appearance: none;
+    }
+
+    .gimbal-speed-range {
+      min-width: 42px;
+      flex: 1 1 auto;
+      height: 13px;
+      margin: 0;
+    }
+
+    .gimbal-roll-step-select {
+      min-width: 44px;
+      height: 23px;
+      margin: 0;
+      padding: 0 2px;
+      font-size: 10px;
+    }
+
+    .gimbal-read-btn {
+      width: 70px;
+      height: 31px;
+      border: none;
+      background: var(--btn);
+      color: #fff;
+      font-family: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .gimbal-read-btn:hover {
+      background: var(--btn-hover);
+    }
+
+    .gimbal-ui-status {
+      display: none !important;
+    }
+
+    /* ---------- 安全关机：保持在正常文档流中 ---------- */
+
+    .shutdown-panel {
+      position: relative !important;
+      inset: auto !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      z-index: auto !important;
+      background: transparent;
+    }
+
+    .shutdown-btn {
+      width: 68%;
+      min-width: 180px;
+      max-width: 300px;
+      height: 40px;
+      margin: 0 auto;
+      font-size: 15px;
+    }
+
+    @media (max-width: 1100px) {
+      .robot-panel .move-pad.manual-layout {
+        grid-template-columns: repeat(3, 64px);
+      }
+
+      .robot-panel .move-pad.auto-layout {
+        grid-template-columns: repeat(3, 64px);
+      }
+
+      .robot-panel .move-btn {
+        width: 64px;
+      }
+
+      .gimbal-settings-row {
+        grid-template-columns: minmax(145px, 1fr) 96px 66px;
+      }
+
+      .gimbal-read-btn {
+        width: 66px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .right-stack {
+        overflow-y: auto !important;
+      }
+
+      .gimbal-settings-row {
+        grid-template-columns: minmax(145px, 1fr) 96px;
+      }
+
+      .gimbal-read-btn {
+        grid-column: 1 / -1;
+        width: 100%;
+        height: 28px;
+      }
+    }
+
+
+    /* =========================================================
+       机器人主要运动按键增强
+       利用底部剩余空间放大前进、后退、左转、右转，
+       同时保持所有面板处于正常文档流中，避免重叠。
+       ========================================================= */
+
+    .robot-panel .move-group {
+      margin-top: 2px;
+    }
+
+    .robot-panel .move-pad-wrap {
+      padding: 2px 0 3px;
+    }
+
+    .robot-panel .move-pad.manual-layout {
+      grid-template-columns: repeat(3, 88px) !important;
+      grid-template-rows: 41px 41px !important;
+      column-gap: 9px !important;
+      row-gap: 7px !important;
+    }
+
+    .robot-panel .move-pad.auto-layout {
+      grid-template-columns: repeat(3, 88px) !important;
+      grid-template-rows: 41px !important;
+      column-gap: 9px !important;
+    }
+
+    .robot-panel .move-btn {
+      width: 88px !important;
+      height: 41px !important;
+      padding: 0 5px !important;
+      font-size: 13px !important;
+      font-weight: 800 !important;
+      letter-spacing: 0.2px;
+    }
+
+    .robot-panel .move-btn .inline-label {
+      font-size: 13px !important;
+      font-weight: 800 !important;
+    }
+
+    /* 增加一点方向控制区域间距，但不明显挤压其他面板。 */
+    .robot-panel .section-title + .move-pad-wrap,
+    .robot-panel .move-group .move-pad-wrap {
+      margin-top: 1px;
+    }
+
+    @media (max-width: 1100px) {
+      .robot-panel .move-pad.manual-layout {
+        grid-template-columns: repeat(3, 82px) !important;
+        grid-template-rows: 39px 39px !important;
+        column-gap: 8px !important;
+        row-gap: 6px !important;
+      }
+
+      .robot-panel .move-pad.auto-layout {
+        grid-template-columns: repeat(3, 82px) !important;
+        grid-template-rows: 39px !important;
+        column-gap: 8px !important;
+      }
+
+      .robot-panel .move-btn {
+        width: 82px !important;
+        height: 39px !important;
+        font-size: 12px !important;
+      }
+
+      .robot-panel .move-btn .inline-label {
+        font-size: 12px !important;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .robot-panel .move-pad.manual-layout {
+        grid-template-columns: repeat(3, 78px) !important;
+        grid-template-rows: 37px 37px !important;
+        column-gap: 7px !important;
+        row-gap: 6px !important;
+      }
+
+      .robot-panel .move-pad.auto-layout {
+        grid-template-columns: repeat(3, 78px) !important;
+        grid-template-rows: 37px !important;
+        column-gap: 7px !important;
+      }
+
+      .robot-panel .move-btn {
+        width: 78px !important;
+        height: 37px !important;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .robot-panel .move-pad.manual-layout {
+        grid-template-columns: repeat(3, minmax(74px, 1fr)) !important;
+        grid-template-rows: 37px 37px !important;
+        width: min(100%, 270px);
+      }
+
+      .robot-panel .move-pad.auto-layout {
+        grid-template-columns: repeat(3, minmax(74px, 1fr)) !important;
+        grid-template-rows: 37px !important;
+        width: min(100%, 270px);
+      }
+
+      .robot-panel .move-btn {
+        width: 100% !important;
+        height: 37px !important;
+      }
+    }
+
+
+    /* =========================================================
+       最终版：适度放大风扇控制与云台控制
+       ========================================================= */
+
+    /* 风扇控制略微放大 */
+    .fan-panel .panel-header {
+      min-height: 38px !important;
+      padding: 8px 11px 7px !important;
+      font-size: 15px !important;
+    }
+
+    .fan-panel .control-body {
+      padding: 9px 11px !important;
+    }
+
+    .fan-panel .fan-status {
+      font-size: 13px !important;
+    }
+
+    .fan-panel .fan-status .value {
+      font-size: 18px !important;
+    }
+
+    .fan-panel .fan-actions {
+      gap: 8px !important;
+    }
+
+    .fan-panel .mini-btn {
+      min-width: 58px !important;
+      height: 36px !important;
+      font-size: 21px !important;
+    }
+
+    .fan-panel .reset-btn {
+      min-width: 66px !important;
+      height: 36px !important;
+      font-size: 13px !important;
+    }
+
+    /* 云台控制略微放大 */
+    .camera-panel .panel-header {
+      min-height: 38px !important;
+      padding: 8px 11px 7px !important;
+      font-size: 15px !important;
+    }
+
+    .camera-panel .gimbal-control-body {
+      padding: 8px 10px 9px !important;
+      gap: 6px !important;
+    }
+
+    .gimbal-link-state {
+      padding: 4px 7px !important;
+      font-size: 11px !important;
+    }
+
+    .gimbal-header-reset {
+      height: 27px !important;
+      padding: 0 10px !important;
+      font-size: 11px !important;
+    }
+
+    .gimbal-pose-card {
+      height: 31px !important;
+      padding: 0 5px !important;
+      gap: 4px !important;
+    }
+
+    .gimbal-pose-card .axis-name {
+      font-size: 10px !important;
+    }
+
+    .gimbal-pose-card .axis-value {
+      font-size: 15px !important;
+    }
+
+    .gimbal-pose-card .axis-unit {
+      font-size: 10px !important;
+    }
+
+    .gimbal-dpad {
+      grid-template-rows: repeat(3, 35px) !important;
+      gap: 5px !important;
+      padding: 6px !important;
+    }
+
+    .gimbal-jog-btn,
+    .gimbal-stop-btn {
+      font-size: 12px !important;
+      padding: 0 4px !important;
+    }
+
+    .gimbal-settings-row {
+      grid-template-columns: minmax(170px, 1fr) 110px 76px !important;
+      gap: 6px !important;
+    }
+
+    .gimbal-speed-compact,
+    .gimbal-roll-compact {
+      height: 34px !important;
+      padding: 4px 6px !important;
+      gap: 6px !important;
+    }
+
+    .gimbal-speed-compact label,
+    .gimbal-roll-compact label {
+      font-size: 10px !important;
+    }
+
+    .gimbal-speed-input {
+      width: 56px !important;
+      min-width: 56px !important;
+      height: 25px !important;
+      font-size: 12px !important;
+    }
+
+    .gimbal-roll-step-select {
+      min-width: 48px !important;
+      height: 25px !important;
+      font-size: 11px !important;
+    }
+
+    .gimbal-read-btn {
+      width: 76px !important;
+      height: 34px !important;
+      font-size: 11px !important;
+    }
+
+    /* 底部仍保留安全间距，避免任何面板重叠 */
+    .right-stack {
+      gap: 8px !important;
+      padding-bottom: 6px;
+    }
+
+    @media (max-width: 1100px) {
+      .gimbal-settings-row {
+        grid-template-columns: minmax(155px, 1fr) 103px 72px !important;
+      }
+
+      .gimbal-read-btn {
+        width: 72px !important;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .fan-panel .mini-btn {
+        min-width: 54px !important;
+      }
+
+      .gimbal-dpad {
+        grid-template-rows: repeat(3, 33px) !important;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .gimbal-settings-row {
+        grid-template-columns: minmax(150px, 1fr) 100px !important;
+      }
+
+      .gimbal-read-btn {
+        grid-column: 1 / -1;
+        width: 100% !important;
+        height: 30px !important;
+      }
+    }
+
+
+    .gimbal-jog-btn:disabled,
+    .gimbal-read-btn:disabled,
+    .gimbal-header-reset:disabled {
+      opacity: 0.48;
+      cursor: not-allowed;
+      filter: grayscale(0.25);
+    }
+
+    .gimbal-stop-btn {
+      touch-action: manipulation;
+    }
+
+    .gimbal-jog-btn,
+    .gimbal-read-btn,
+    .gimbal-header-reset {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+
+    /* =========================================================
+       G1 云台最终紧凑布局
+       - 去掉 YAW/ROLL/PITCH 常驻数显
+       - 去掉左倾、右倾、独立停止按钮
+       - 四向按钮参考机器人方向控制的十字布局
+       - 每次点击由后端自动 Neutral -> Move -> Stop
+       ========================================================= */
+
+    .camera-panel .gimbal-control-body {
+      padding: 7px 10px 8px !important;
+      gap: 7px !important;
+      overflow: hidden !important;
+    }
+
+    .gimbal-panel-header {
+      gap: 8px !important;
+    }
+
+    .gimbal-header-actions {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      gap: 4px !important;
+      min-width: 0 !important;
+      flex-wrap: nowrap !important;
+    }
+
+    .gimbal-header-read,
+    .gimbal-header-reset {
+      width: auto !important;
+      min-width: 58px !important;
+      height: 26px !important;
+      padding: 0 8px !important;
+      margin: 0 !important;
+      border: none !important;
+      font-size: 12px !important;
+      font-weight: 700 !important;
+      line-height: 1 !important;
+      white-space: nowrap !important;
+    }
+
+    .gimbal-header-read {
+      background: var(--btn) !important;
+      color: #fff !important;
+    }
+
+    .gimbal-header-read:hover {
+      background: var(--btn-hover) !important;
+    }
+
+    .gimbal-control-zone {
+      width: 100% !important;
+      display: flex !important;
+      justify-content: center !important;
+      flex: 0 0 auto !important;
+    }
+
+    .gimbal-dpad.gimbal-dpad-compact {
+      width: min(100%, 360px) !important;
+      margin: 0 auto !important;
+      display: grid !important;
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+      grid-template-rows: repeat(2, 38px) !important;
+      grid-template-areas:
+        ". pitch-up ."
+        "yaw-left pitch-down yaw-right" !important;
+      column-gap: 10px !important;
+      row-gap: 7px !important;
+      padding: 6px 8px !important;
+      border: 1px solid rgba(0, 255, 170, 0.16) !important;
+      background: rgba(0, 0, 0, 0.12) !important;
+      box-sizing: border-box !important;
+    }
+
+    .gimbal-dpad-compact .gimbal-jog-btn {
+      width: 100% !important;
+      height: 38px !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      padding: 0 8px !important;
+      background: var(--control-mode-color) !important;
+      color: #fff !important;
+      font-size: 13px !important;
+      font-weight: 700 !important;
+      line-height: 1 !important;
+      border: none !important;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.10),
+        0 3px 8px rgba(0,0,0,0.18) !important;
+      touch-action: manipulation !important;
+    }
+
+    .gimbal-dpad-compact .gimbal-jog-btn:hover {
+      background: var(--control-mode-hover) !important;
+    }
+
+    .gimbal-dpad-compact .gimbal-jog-btn:active,
+    .gimbal-dpad-compact .gimbal-jog-btn.holding {
+      background: var(--control-mode-active) !important;
+      transform: translateY(1px) !important;
+    }
+
+    .gimbal-dpad-compact .pitch-up {
+      grid-area: pitch-up !important;
+    }
+
+    .gimbal-dpad-compact .pitch-down {
+      grid-area: pitch-down !important;
+    }
+
+    .gimbal-dpad-compact .yaw-left {
+      grid-area: yaw-left !important;
+    }
+
+    .gimbal-dpad-compact .yaw-right {
+      grid-area: yaw-right !important;
+    }
+
+    .gimbal-settings-row.gimbal-settings-row-compact {
+      width: min(100%, 360px) !important;
+      margin: 0 auto !important;
+      display: block !important;
+      min-width: 0 !important;
+    }
+
+    .gimbal-settings-row-compact .gimbal-speed-compact {
+      width: 100% !important;
+      height: 31px !important;
+      min-width: 0 !important;
+      padding: 3px 7px !important;
+      box-sizing: border-box !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      border: 1px solid rgba(255,255,255,0.09) !important;
+      background: rgba(255,255,255,0.025) !important;
+    }
+
+    .gimbal-settings-row-compact .gimbal-speed-compact label {
+      flex: 0 0 auto !important;
+      font-size: 10px !important;
+      color: #d8e9e1 !important;
+    }
+
+    .gimbal-settings-row-compact .gimbal-speed-input {
+      width: 48px !important;
+      min-width: 48px !important;
+      height: 23px !important;
+      font-size: 11px !important;
+    }
+
+    .gimbal-settings-row-compact .gimbal-speed-range {
+      min-width: 72px !important;
+      flex: 1 1 auto !important;
+      height: 13px !important;
+      margin: 0 !important;
+    }
+
+    .gimbal-auto-stop-note {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 9px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    /* 已删除的旧 UI 即便某些浏览器缓存了旧结构，也不再占布局。 */
+    .gimbal-pose-strip,
+    .gimbal-roll-compact,
+    .gimbal-stop-btn,
+    .gimbal-jog-btn.roll-left,
+    .gimbal-jog-btn.roll-right {
+      display: none !important;
+    }
+
+    @media (max-width: 860px) {
+      .gimbal-dpad.gimbal-dpad-compact {
+        width: min(100%, 330px) !important;
+        grid-template-rows: repeat(2, 36px) !important;
+        column-gap: 8px !important;
+        row-gap: 6px !important;
+      }
+
+      .gimbal-dpad-compact .gimbal-jog-btn {
+        height: 36px !important;
+        font-size: 12px !important;
+      }
+
+      .gimbal-settings-row.gimbal-settings-row-compact {
+        width: min(100%, 330px) !important;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .gimbal-panel-header {
+        align-items: center !important;
+      }
+
+      .gimbal-header-actions {
+        gap: 3px !important;
+      }
+
+      .gimbal-link-state {
+        padding: 3px 5px !important;
+        font-size: 9px !important;
+      }
+
+      .gimbal-header-read,
+      .gimbal-header-reset {
+        min-width: 50px !important;
+        height: 24px !important;
+        padding: 0 5px !important;
+        font-size: 9px !important;
+      }
+
+      .gimbal-dpad.gimbal-dpad-compact,
+      .gimbal-settings-row.gimbal-settings-row-compact {
+        width: 100% !important;
+      }
+
+      .gimbal-auto-stop-note {
+        display: none !important;
+      }
+    }
+
+
+    /* =========================================================
+       右侧控制区最终纵向均匀布局
+       - 保留机器人运动控制现有十字排布
+       - 四个区块撑满右栏，安全关机固定在最下方
+       - 统一三个控制区的主要字号并放大垂直操作空间
+       ========================================================= */
+
+    @media (min-width: 721px) {
+      .right-col {
+        height: 100% !important;
+        min-height: 0 !important;
+      }
+
+      .right-stack {
+        height: 100% !important;
+        min-height: 0 !important;
+        display: grid !important;
+        grid-template-rows:
+          minmax(360px, 1.55fr)
+          minmax(100px, 0.55fr)
+          minmax(230px, 1.05fr)
+          minmax(52px, 0.24fr) !important;
+        gap: 10px !important;
+        align-content: stretch !important;
+        overflow: hidden !important;
+        padding-right: 0 !important;
+      }
+
+      .right-stack > * {
+        min-height: 0 !important;
+      }
+
+      .robot-panel,
+      .fan-panel,
+      .camera-panel {
+        min-height: 0 !important;
+      }
+
+      .robot-panel .panel-header,
+      .fan-panel .panel-header,
+      .camera-panel .panel-header {
+        min-height: 38px !important;
+        padding: 9px 11px 8px !important;
+        font-size: 15px !important;
+      }
+
+      .robot-panel .control-body {
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        padding: 10px 11px 12px !important;
+        gap: 10px !important;
+        justify-content: space-around !important;
+        overflow: visible !important;
+      }
+
+      .robot-panel .robot-toggle-btn {
+        height: 46px !important;
+        font-size: 15px !important;
+      }
+
+      .robot-panel .section-title,
+      .robot-panel .speed-readout,
+      .fan-panel .fan-status {
+        font-size: 14px !important;
+      }
+
+      .robot-panel .speed-readout .value,
+      .fan-panel .fan-status .value {
+        font-size: 18px !important;
+      }
+
+      .robot-panel .move-group {
+        margin-top: 4px !important;
+      }
+
+      .robot-panel .move-pad-wrap {
+        padding: 8px 0 6px !important;
+      }
+
+      .robot-panel .move-btn {
+        height: 44px !important;
+        font-size: 13px !important;
+      }
+
+      .robot-panel .move-btn .inline-label {
+        font-size: 13px !important;
+      }
+
+      .fan-panel .control-body {
+        flex: 1 1 auto !important;
+        height: auto !important;
+        min-height: 0 !important;
+        padding: 12px 11px !important;
+        justify-content: center !important;
+        overflow: visible !important;
+      }
+
+      .fan-panel .fan-row {
+        min-height: 46px !important;
+      }
+
+      .fan-panel .fan-actions {
+        gap: 10px !important;
+      }
+
+      .fan-panel .mini-btn,
+      .fan-panel .reset-btn {
+        height: 44px !important;
+      }
+
+      .fan-panel .reset-btn {
+        font-size: 13px !important;
+      }
+
+      .camera-panel .gimbal-control-body {
+        flex: 1 1 auto !important;
+        height: auto !important;
+        min-height: 0 !important;
+        padding: 11px 10px 12px !important;
+        gap: 10px !important;
+        justify-content: space-around !important;
+        overflow: visible !important;
+      }
+
+      .camera-panel .gimbal-control-zone {
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+      }
+
+      .camera-panel .gimbal-dpad.gimbal-dpad-compact {
+        grid-template-rows: repeat(2, 44px) !important;
+        row-gap: 9px !important;
+      }
+
+      .camera-panel .gimbal-dpad-compact .gimbal-jog-btn {
+        height: 44px !important;
+        font-size: 13px !important;
+      }
+
+      .camera-panel .gimbal-settings-row.gimbal-settings-row-compact {
+        flex: 0 0 auto !important;
+      }
+
+      .shutdown-panel {
+        height: 100% !important;
+        min-height: 0 !important;
+        display: flex !important;
+        align-items: stretch !important;
+        justify-content: center !important;
+        padding: 0 !important;
+        overflow: visible !important;
+      }
+
+      .shutdown-btn {
+        width: 68% !important;
+        height: 100% !important;
+        min-height: 52px !important;
+        max-height: none !important;
+        align-self: stretch !important;
+        font-size: 15px !important;
+      }
+    }
+
+    @media (min-width: 721px) and (max-height: 820px) {
+      .right-stack {
+        grid-template-rows:
+          minmax(280px, 1.35fr)
+          minmax(76px, 0.45fr)
+          minmax(180px, 0.95fr)
+          minmax(48px, 0.22fr) !important;
+        gap: 8px !important;
+      }
+
+      .robot-panel .control-body {
+        padding-top: 8px !important;
+        padding-bottom: 9px !important;
+        gap: 7px !important;
+      }
+
+      .robot-panel .robot-toggle-btn {
+        height: 40px !important;
+      }
+
+      .robot-panel .move-pad-wrap {
+        padding-top: 4px !important;
+        padding-bottom: 4px !important;
+      }
+
+      .robot-panel .move-btn,
+      .camera-panel .gimbal-dpad-compact .gimbal-jog-btn {
+        height: 40px !important;
+      }
+
+      .camera-panel .gimbal-dpad.gimbal-dpad-compact {
+        grid-template-rows: repeat(2, 40px) !important;
+      }
+
+      .fan-panel .mini-btn,
+      .fan-panel .reset-btn {
+        height: 38px !important;
+      }
+    }
+
+
+  </style>
+</head>
+<body>
+  <div class="page" id="pageRoot">
+    <div class="layout">
+      <div class="left-col">
+        <section class="panel video-panel">
+          <div class="panel-header">画面预览</div>
+
+          <div class="video-box">
+            <div class="video-frame" id="videoFrameWrap">
+              <video
+                id="videoFrame"
+                class="video-feed"
+                autoplay
+                muted
+                playsinline
+                disablepictureinpicture
+                preload="none"
+              ></video>
+
+              <iframe
+                id="videoFallbackFrame"
+                class="video-feed video-fallback"
+                title="MediaMTX Compatibility Stream"
+                scrolling="no"
+                allow="autoplay; fullscreen; picture-in-picture"
+                referrerpolicy="no-referrer"
+              ></iframe>
+
+              <canvas id="detectionCanvas" class="detection-overlay"></canvas>
+
+              <div class="stream-status" id="streamStatus">视频连接中...</div>
+              <div class="datetime" id="datetime">--/--/-- --:--:--</div>
+
+              <button
+                id="fullscreenBtn"
+                class="fullscreen-btn"
+                type="button"
+                title="全屏查看"
+                onclick="toggleFullscreen()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <polyline points="9 3 3 3 3 9"></polyline>
+                  <line x1="3" y1="3" x2="10" y2="10"></line>
+                  <polyline points="15 21 21 21 21 15"></polyline>
+                  <line x1="14" y1="14" x2="21" y2="21"></line>
+                  <polyline points="21 9 21 3 15 3"></polyline>
+                  <line x1="21" y1="3" x2="14" y2="10"></line>
+                  <polyline points="3 15 3 21 9 21"></polyline>
+                  <line x1="3" y1="21" x2="10" y2="14"></line>
+                </svg>
+              </button>
+            </div>
+
+            <div class="button-row">
+              <button id="photoBtn" class="feature-btn primary" onclick="capturePhoto()">拍照</button>
+              <button id="recordBtn" class="feature-btn primary" onclick="toggleRecording()">开始录制</button>
+              <button id="detectionBtn" class="feature-btn primary" onclick="toggleDetection()">异物识别</button>
+              <button id="cleaningBtn" class="feature-btn primary" onclick="toggleCleaning()">异物清理</button>
+              <button id="avoidanceBtn" class="feature-btn primary" title="仅自动模式可用" onclick="toggleObstacleAvoidance()" disabled>自动避障</button>
+              <button id="modeToggleBtn" class="feature-btn mode-toggle-btn" onclick="toggleControlMode()">手控模式</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="right-col">
+        <div class="right-stack">
+          <section class="panel control-panel robot-panel">
+            <div class="panel-header">机器人运动控制</div>
+            <div class="control-body">
+              <button
+                id="robotToggleBtn"
+                class="robot-toggle-btn"
+                onclick="toggleRobotMotion()"
+              >
+                启动
+              </button>
+
+              <div class="ctrl-group">
+                <div class="section-title">速度控制</div>
+
+                <div class="speed-header">
+                  <div class="speed-readout">
+                    当前底盘速度:
+                    <span id="speedValue" class="value">0.00</span>m/s
+                  </div>
+
+                  <div class="speed-input-wrap">
+                    <input
+                      id="speedInput"
+                      class="speed-input"
+                      type="number"
+                      min="0"
+                      max="0.5"
+                      step="0.01"
+                      value="0.00"
+                    />
+                    <span class="speed-unit">m/s</span>
+                  </div>
+                </div>
+
+                <input
+                  id="speedSlider"
+                  type="range"
+                  min="0"
+                  max="0.5"
+                  step="0.01"
+                  value="0.00"
+                  oninput="previewSpeed(this.value)"
+                  onchange="setSpeed(this.value)"
+                />
+
+                <div class="speed-scale">
+                  <span>0.0</span>
+                  <span>0.25</span>
+                  <span>0.5</span>
+                </div>
+              </div>
+
+              <div class="ctrl-group move-group">
+                <div class="section-title">方向控制</div>
+
+                <div class="move-pad-wrap">
+                  <div id="movePad" class="move-pad manual-layout">
+                    <button
+                      id="moveForwardBtn"
+                      class="move-btn forward"
+                      title="前进"
+                    >
+                      <span class="inline-label">前进</span>
+                    </button>
+
+                    <button
+                      id="moveLeftBtn"
+                      class="move-btn left"
+                      title="左转"
+                      onmousedown="startMoveDirection('left', this)"
+                      onmouseup="stopMoveDirection()"
+                      onmouseleave="stopMoveDirection()"
+                      ontouchstart="startMoveDirection('left', this); return false;"
+                      ontouchend="stopMoveDirection()"
+                    >
+                      <span class="inline-label">左转</span>
+                    </button>
+
+                    <button
+                      id="moveStopBtn"
+                      class="move-btn stop"
+                      title="停止"
+                      onclick="handleStopDirection(this)"
+                      ontouchstart="handleStopDirection(this); return false;"
+                    >
+                      <span class="inline-label">停止</span>
+                    </button>
+
+                    <button
+                      id="moveRightBtn"
+                      class="move-btn right"
+                      title="右转"
+                      onmousedown="startMoveDirection('right', this)"
+                      onmouseup="stopMoveDirection()"
+                      onmouseleave="stopMoveDirection()"
+                      ontouchstart="startMoveDirection('right', this); return false;"
+                      ontouchend="stopMoveDirection()"
+                    >
+                      <span class="inline-label">右转</span>
+                    </button>
+
+                    <button
+                      id="moveBackwardBtn"
+                      class="move-btn backward"
+                      title="后退"
+                    >
+                      <span class="inline-label">后退</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel control-panel fan-panel">
+            <div class="panel-header">机器人风扇速度控制</div>
+            <div class="control-body">
+              <div class="fan-row">
+                <div class="fan-status">
+                  当前风扇速度:
+                  <span id="fanSpeedValue" class="value">0</span>
+                </div>
+
+                <div class="fan-actions">
+                  <button class="mini-btn" onclick="changeFanSpeed(1)">＋</button>
+                  <button class="mini-btn" onclick="changeFanSpeed(-1)">－</button>
+                  <button class="reset-btn" onclick="resetFanSpeed()">重置</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+
+
+
+          <section class="panel control-panel camera-panel">
+            <div class="panel-header gimbal-panel-header">
+              <span>云台控制</span>
+
+              <div class="gimbal-header-actions">
+                <span id="gimbalLinkState" class="gimbal-link-state">连接检测</span>
+
+                <button
+                  class="gimbal-read-btn gimbal-header-read"
+                  type="button"
+                  title="手动读取一次云台姿态，仅用于诊断，不在主界面常驻显示数值"
+                  onclick="requestGimbalPose()"
+                >读取姿态</button>
+
+                <button
+                  class="gimbal-header-reset"
+                  type="button"
+                  title="恢复云台初始位姿"
+                  onclick="resetGimbalHome()"
+                >视角重置</button>
+              </div>
+            </div>
+
+            <div class="control-body gimbal-control-body">
+              <div class="gimbal-control-zone">
+                <div
+                  class="gimbal-dpad gimbal-dpad-compact"
+                  aria-label="云台方向控制，单击后自动停止"
+                >
+                  <button
+                    class="gimbal-jog-btn pitch-up"
+                    type="button"
+                    title="单击抬头；动作结束后自动停止"
+                    onclick="jogGimbalOnce('pitch', 1, this)"
+                    oncontextmenu="return false;"
+                  >▲ 抬头</button>
+
+                  <button
+                    class="gimbal-jog-btn yaw-left"
+                    type="button"
+                    title="单击左转；动作结束后自动停止"
+                    onclick="jogGimbalOnce('yaw', -1, this)"
+                    oncontextmenu="return false;"
+                  >◀ 左转</button>
+
+                  <button
+                    class="gimbal-jog-btn pitch-down"
+                    type="button"
+                    title="单击低头；动作结束后自动停止"
+                    onclick="jogGimbalOnce('pitch', -1, this)"
+                    oncontextmenu="return false;"
+                  >▼ 低头</button>
+
+                  <button
+                    class="gimbal-jog-btn yaw-right"
+                    type="button"
+                    title="单击右转；动作结束后自动停止"
+                    onclick="jogGimbalOnce('yaw', 1, this)"
+                    oncontextmenu="return false;"
+                  >右转 ▶</button>
+                </div>
+              </div>
+
+              <div class="gimbal-settings-row gimbal-settings-row-compact">
+                <div class="gimbal-speed-compact">
+                  <label for="gimbalSpeedInput">运动角度</label>
+
+                  <input
+                    id="gimbalSpeedInput"
+                    class="gimbal-speed-input"
+                    type="number"
+                    min="1"
+                    max="128"
+                    step="1"
+                    value="17"
+                    inputmode="numeric"
+                    onchange="syncGimbalSpeedFromInput(this.value)"
+                  />
+
+                  <input
+                    id="gimbalSpeedSlider"
+                    class="gimbal-speed-range"
+                    type="range"
+                    min="1"
+                    max="128"
+                    step="1"
+                    value="17"
+                    oninput="syncGimbalSpeedFromSlider(this.value)"
+                  />
+
+                  <span
+                    class="gimbal-auto-stop-note"
+                    title="每次方向点击均由后端自动发送停止命令"
+                  >单击自动停止</span>
+                </div>
+              </div>
+
+              <div id="gimbalUiStatus" class="gimbal-ui-status" aria-live="polite"></div>
+            </div>
+          </section>
+
+          <section class="shutdown-panel">
+            <button class="shutdown-btn" onclick="safeShutdown()">安全关机</button>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const pageRoot = document.getElementById("pageRoot");
+    const gimbalSpeedSlider = document.getElementById("gimbalSpeedSlider");
+    const gimbalSpeedInput = document.getElementById("gimbalSpeedInput");
+    const gimbalLinkState = document.getElementById("gimbalLinkState");
+    const gimbalUiStatus = document.getElementById("gimbalUiStatus");
+    const datetimeBox = document.getElementById("datetime");
+
+    const streamStatus = document.getElementById("streamStatus");
+    const videoFrame = document.getElementById("videoFrame");
+    const videoFallbackFrame = document.getElementById("videoFallbackFrame");
+    const videoFrameWrap = document.getElementById("videoFrameWrap");
+    const detectionCanvas = document.getElementById("detectionCanvas");
+    const detectionCtx = detectionCanvas.getContext("2d");
+
+    const photoBtn = document.getElementById("photoBtn");
+    const recordBtn = document.getElementById("recordBtn");
+    const detectionBtn = document.getElementById("detectionBtn");
+    const cleaningBtn = document.getElementById("cleaningBtn");
+    const avoidanceBtn = document.getElementById("avoidanceBtn");
+    const modeToggleBtn = document.getElementById("modeToggleBtn");
+
+    const robotToggleBtn = document.getElementById("robotToggleBtn");
+    const speedValue = document.getElementById("speedValue");
+    const speedInput = document.getElementById("speedInput");
+    const speedSlider = document.getElementById("speedSlider");
+
+    const fanSpeedValue = document.getElementById("fanSpeedValue");
+
+    const moveForwardBtn = document.getElementById("moveForwardBtn");
+    const moveLeftBtn = document.getElementById("moveLeftBtn");
+    const moveStopBtn = document.getElementById("moveStopBtn");
+    const moveRightBtn = document.getElementById("moveRightBtn");
+    const moveBackwardBtn = document.getElementById("moveBackwardBtn");
+    const movePad = document.getElementById("movePad");
+
+
+    const TURN_SCALE = 10;
+    const FAN_MIN = 0;
+    const FAN_MAX = 180;
+
+    const CONTROL_MODES = {
+      manual: {
+        label: "手控模式",
+        color: "#1eaa67",
+        hover: "#26c176",
+        active: "#188a55",
+        visibleButtons: ["forward", "left", "right", "backward"],
+        movableDirections: ["forward", "left", "right", "backward"]
+      },
+      auto: {
+        label: "自动模式",
+        color: "#2a68ff",
+        hover: "#3f7bff",
+        active: "#2157d8",
+        visibleButtons: ["forward", "backward", "stop"],
+        movableDirections: ["forward", "backward"]
+      }
+    };
+
+    const moveButtons = {
+      forward: moveForwardBtn,
+      left: moveLeftBtn,
+      stop: moveStopBtn,
+      right: moveRightBtn,
+      backward: moveBackwardBtn
+    };
+
+    let controlMode = "manual";
+    let autoMotionMode = "straight";
+
+    const AUTO_MOTION_LABELS = { straight: "直线运动" };
+
+    // G1 云台只保留抬头/低头/左转/右转；每次单击由后端自动 Stop。
+    // 快速连续点击不会并发发 HTTP，而是进入前端串行队列。
+    let gimbalSpeed = 17;
+    let gimbalBusy = false;
+    let gimbalStopInFlight = false;
+    let gimbalActiveButton = null;
+
+    const GIMBAL_CLIENT_GAP_MS = 180;
+    const GIMBAL_MAX_PENDING_COMMANDS = 4;
+    const GIMBAL_API_TIMEOUT_MS = 6500;
+
+    let gimbalCommandQueue = [];
+    let gimbalQueueRunning = false;
+    let gimbalUiGeneration = 0;
+    let gimbalLastCommandFinishedAt = 0;
+
+    let directionTimer = null;
+    let directionButton = null;
+    let directionRunning = false;
+    let currentDirection = null;
+    let autoMotionRequestId = 0;
+    let movementRequestGeneration = 0;
+    let movementRequestChain = Promise.resolve();
+
+    let statusTimer = null;
+
+    // 原生 WHEP + <video>，可以直接读取 RTCPeerConnection.getStats()。
+    let lastStreamGeneration = null;
+    let streamFailureCount = 0;
+    let lastVideoReloadAt = 0;
+    const VIDEO_RELOAD_COOLDOWN_MS = 4500;
+
+    let whepPc = null;
+    let whepSessionId = "";
+    let whepConnectGeneration = 0;
+    let whepReconnectTimer = null;
+    let whepConnecting = false;
+    let whepFailureCount = 0;
+    let iframeFallbackActive = false;
+    const WHEP_FAILURES_BEFORE_IFRAME = 3;
+
+    const PAD_STATS_INTERVAL_MS = 2000;
+    const padClientId = (
+      window.crypto && typeof window.crypto.randomUUID === "function"
+        ? window.crypto.randomUUID()
+        : `pad-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    );
+    let previousRtcStats = null;
+
+    let isRecording = false;
+    let isRecordingBusy = false;
+
+    let isCleaning = false;
+    let isCleaningBusy = false;
+
+    let isDetectionEnabled = false;
+    let isDetectionBusy = false;
+
+    let isObstacleAvoidanceEnabled = false;
+    let isObstacleAvoidanceActive = false;
+    let isObstacleAvoidanceBusy = false;
+    let obstacleAvoidanceAction = "idle";
+    let obstacleAvoidanceDirection = "none";
+    let obstacleAvoidanceLeftOverlap = false;
+    let obstacleAvoidanceRightOverlap = false;
+    let obstacleAvoidanceStatus = "";
+    let obstacleAvoidanceError = "";
+    let obstacleAvoidanceDangerZone = null;
+
+    let isRobotRunning = false;
+    let isRobotBusy = false;
+
+    let currentSpeed = 0.00;
+    let currentFanSpeed = 0;
+
+    let detectionTimer = null;
+    let latestDetectionData = null;
+    let latestYoloDetectionData = null;
+    let latestForeignDetectionData = null;
+    let latestVideoWidth = 1280;
+    let latestVideoHeight = 720;
+
+    function updateDateTime() {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, "0");
+      const d = String(now.getDate()).padStart(2, "0");
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const ss = String(now.getSeconds()).padStart(2, "0");
+      datetimeBox.textContent = `${y}/${m}/${d} ${hh}:${mm}:${ss}`;
+    }
+
+    function setStreamStatus(text) {
+      streamStatus.textContent = text;
+    }
+
+    function buildMediaMTXFallbackUrl() {
+      const host = window.location.hostname || "127.0.0.1";
+      const params = new URLSearchParams({
+        controls: "false",
+        muted: "true",
+        autoplay: "true",
+        playsInline: "true",
+        t: String(Date.now())
+      });
+      return `http://${host}:8889/cam?${params.toString()}`;
+    }
+
+    function deactivateIframeFallback() {
+      iframeFallbackActive = false;
+
+      if (videoFallbackFrame) {
+        videoFallbackFrame.classList.remove("active");
+        videoFallbackFrame.src = "about:blank";
+      }
+
+      if (videoFrame) {
+        videoFrame.style.display = "block";
+      }
+    }
+
+    async function activateIframeFallback(reason = "") {
+      iframeFallbackActive = true;
+      await closeWhepReader(true);
+
+      if (videoFrame) {
+        videoFrame.style.display = "none";
+      }
+
+      if (videoFallbackFrame) {
+        videoFallbackFrame.classList.add("active");
+        videoFallbackFrame.src = buildMediaMTXFallbackUrl();
+      }
+
+      const suffix = reason ? `：${reason}` : "";
+      setStreamStatus(`原生 WHEP 连续失败，已切换兼容播放器${suffix}`);
+    }
+
+    function waitForIceGatheringComplete(pc, timeoutMs = 3500) {
+      if (!pc || pc.iceGatheringState === "complete") {
+        return Promise.resolve();
+      }
+
+      return new Promise((resolve) => {
+        let finished = false;
+
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          pc.removeEventListener("icegatheringstatechange", onState);
+          resolve();
+        };
+
+        const onState = () => {
+          if (pc.iceGatheringState === "complete") finish();
+        };
+
+        const timer = setTimeout(finish, timeoutMs);
+        pc.addEventListener("icegatheringstatechange", onState);
+      });
+    }
+
+    async function closeWhepReader(sendDelete = true) {
+      whepConnectGeneration += 1;
+
+      if (whepReconnectTimer) {
+        clearTimeout(whepReconnectTimer);
+        whepReconnectTimer = null;
+      }
+
+      const sessionId = whepSessionId;
+      whepSessionId = "";
+
+      const pc = whepPc;
+      whepPc = null;
+      previousRtcStats = null;
+
+      if (pc) {
+        try {
+          pc.ontrack = null;
+          pc.onconnectionstatechange = null;
+          pc.oniceconnectionstatechange = null;
+          pc.close();
+        } catch (_) {}
+      }
+
+      if (videoFrame) {
+        try {
+          videoFrame.pause();
+          videoFrame.srcObject = null;
+        } catch (_) {}
+      }
+
+      if (sendDelete && sessionId) {
+        try {
+          await fetch(`/api/whep_session/${encodeURIComponent(sessionId)}`, {
+            method: "DELETE",
+            cache: "no-store",
+            keepalive: true
+          });
+        } catch (_) {}
+      }
+    }
+
+    function scheduleWhepReconnect(reason = "") {
+      if (document.visibilityState === "hidden") return;
+      if (whepReconnectTimer) return;
+
+      if (reason) {
+        setStreamStatus(`视频正在重连：${reason}`);
+      }
+
+      whepReconnectTimer = setTimeout(() => {
+        whepReconnectTimer = null;
+        connectVideoStream().catch((err) => {
+          console.error("WHEP reconnect error:", err);
+        });
+      }, 1500);
+    }
+
+    async function connectVideoStream(force = false) {
+      const now = Date.now();
+
+      if (whepConnecting) return;
+      if (iframeFallbackActive && !force) return;
+      if (!force && now - lastVideoReloadAt < VIDEO_RELOAD_COOLDOWN_MS) return;
+
+      if (force) {
+        whepFailureCount = 0;
+        deactivateIframeFallback();
+      }
+
+      lastVideoReloadAt = now;
+      whepConnecting = true;
+
+      try {
+        await closeWhepReader(true);
+        const connectionGeneration = whepConnectGeneration;
+        setStreamStatus("WHEP 视频连接中...");
+
+        let iceServers = [];
+        try {
+          const optionsRes = await fetch("/api/whep_options", {
+            method: "OPTIONS",
+            cache: "no-store"
+          });
+          const optionsData = await optionsRes.json();
+
+          if (
+            optionsRes.ok &&
+            optionsData.ok &&
+            Array.isArray(optionsData.ice_servers)
+          ) {
+            iceServers = optionsData.ice_servers;
+          }
+        } catch (err) {
+          console.warn(
+            "WHEP OPTIONS unavailable; using LAN host candidates only:",
+            err
+          );
+        }
+
+        if (connectionGeneration !== whepConnectGeneration) return;
+
+        const pc = new RTCPeerConnection({
+          iceServers,
+          bundlePolicy: "max-bundle"
+        });
+        whepPc = pc;
+
+        pc.addTransceiver("video", { direction: "recvonly" });
+
+        pc.ontrack = (event) => {
+          if (pc !== whepPc) return;
+
+          const stream = (
+            event.streams && event.streams.length > 0
+              ? event.streams[0]
+              : new MediaStream([event.track])
+          );
+
+          videoFrame.srcObject = stream;
+          videoFrame.muted = true;
+          videoFrame.playsInline = true;
+
+          const playPromise = videoFrame.play();
+          if (playPromise && typeof playPromise.catch === "function") {
+            playPromise.catch((err) => {
+              console.warn("video.play() deferred:", err);
+            });
+          }
+        };
+
+        const connectionChanged = () => {
+          if (pc !== whepPc) return;
+
+          const state = pc.connectionState || pc.iceConnectionState || "";
+
+          if (state === "connected" || state === "completed") {
+            streamFailureCount = 0;
+            return;
+          }
+
+          if (state === "failed" || state === "closed") {
+            scheduleWhepReconnect(state);
+            return;
+          }
+
+          if (state === "disconnected") {
+            setTimeout(() => {
+              if (pc !== whepPc) return;
+              const later = pc.connectionState || pc.iceConnectionState || "";
+              if (later === "disconnected" || later === "failed") {
+                scheduleWhepReconnect(later);
+              }
+            }, 1800);
+          }
+        };
+
+        pc.onconnectionstatechange = connectionChanged;
+        pc.oniceconnectionstatechange = connectionChanged;
+
+        const offer = await pc.createOffer({
+          offerToReceiveVideo: true,
+          offerToReceiveAudio: false
+        });
+        await pc.setLocalDescription(offer);
+
+        // 收集完整 LAN ICE candidate 后一次性 POST。
+        // 不依赖 trickle ICE，兼容更多 Pad 浏览器。
+        await waitForIceGatheringComplete(pc, 3500);
+
+        if (pc !== whepPc || connectionGeneration !== whepConnectGeneration) {
+          return;
+        }
+
+        const localSdp = pc.localDescription && pc.localDescription.sdp;
+        if (!localSdp) {
+          throw new Error("浏览器未生成有效 SDP offer");
+        }
+
+        const offerRes = await fetch("/api/whep_offer", {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: localSdp,
+          cache: "no-store"
+        });
+
+        const offerData = await offerRes.json();
+
+        if (!offerRes.ok || !offerData.ok || !offerData.answer) {
+          throw new Error(
+            offerData.message || `WHEP offer failed: ${offerRes.status}`
+          );
+        }
+
+        if (pc !== whepPc || connectionGeneration !== whepConnectGeneration) {
+          return;
+        }
+
+        whepSessionId = String(offerData.session_id || "");
+        await pc.setRemoteDescription({
+          type: "answer",
+          sdp: offerData.answer
+        });
+
+        whepFailureCount = 0;
+        setStreamStatus("WHEP 已建立，正在等待首帧...");
+      } catch (err) {
+        console.error("connectVideoStream error:", err);
+        whepFailureCount += 1;
+        setStreamStatus(
+          `WHEP 连接失败 ${whepFailureCount}/${WHEP_FAILURES_BEFORE_IFRAME}：${err.message || err}`
+        );
+        await closeWhepReader(true);
+
+        if (whepFailureCount >= WHEP_FAILURES_BEFORE_IFRAME) {
+          await activateIframeFallback("保留原稳定 MediaMTX WebRTC 页面");
+        } else {
+          scheduleWhepReconnect("WHEP握手失败");
+        }
+      } finally {
+        whepConnecting = false;
+      }
+    }
+
+    function handleVideoRecovery(basic) {
+      if (!basic || typeof basic !== "object") return;
+
+      const generation = Number(basic.stream_generation);
+
+      if (Number.isFinite(generation)) {
+        if (lastStreamGeneration === null) {
+          lastStreamGeneration = generation;
+        } else if (generation !== lastStreamGeneration) {
+          lastStreamGeneration = generation;
+          streamFailureCount = 0;
+          connectVideoStream(true).catch(console.error);
+          return;
+        }
+      }
+
+      if (basic.stream_ok) {
+        streamFailureCount = 0;
+
+        if (!iframeFallbackActive && !whepPc && !whepConnecting) {
+          connectVideoStream().catch(console.error);
+        }
+        return;
+      }
+
+      streamFailureCount += 1;
+      if (streamFailureCount >= 2) {
+        connectVideoStream().catch(console.error);
+      }
+    }
+
+    async function collectAndReportWebRTCStats() {
+      const pc = whepPc;
+
+      if (!pc || pc.connectionState === "closed") return;
+
+      try {
+        const reports = await pc.getStats();
+        let inbound = null;
+        let codec = "";
+
+        reports.forEach((report) => {
+          if (
+            report.type === "inbound-rtp" &&
+            (report.kind === "video" || report.mediaType === "video") &&
+            !report.isRemote
+          ) {
+            inbound = report;
+          }
+        });
+
+        if (!inbound) return;
+
+        if (inbound.codecId) {
+          const codecReport = reports.get(inbound.codecId);
+          if (codecReport && codecReport.mimeType) {
+            codec = String(codecReport.mimeType);
+          }
+        }
+
+        const nowMs = Number(inbound.timestamp || performance.now());
+        const bytes = Number(inbound.bytesReceived || 0);
+        const packetsReceived = Number(inbound.packetsReceived || 0);
+        const packetsLost = Number(inbound.packetsLost || 0);
+        const framesDecoded = Number(inbound.framesDecoded || 0);
+        const framesDropped = Number(inbound.framesDropped || 0);
+
+        let bitrateMbps = 0;
+        let packetLossPct = 0;
+        let dropPct = 0;
+        let fps = Number(inbound.framesPerSecond || 0);
+        let packetsReceivedDelta = 0;
+        let framesDecodedDelta = 0;
+        let framesDroppedDelta = 0;
+        let sampleValid = false;
+
+        if (previousRtcStats) {
+          const seconds = Math.max(
+            0.2,
+            (nowMs - previousRtcStats.timestamp) / 1000
+          );
+
+          const bytesDelta = Math.max(
+            0,
+            bytes - previousRtcStats.bytesReceived
+          );
+          packetsReceivedDelta = Math.max(
+            0,
+            packetsReceived - previousRtcStats.packetsReceived
+          );
+          const packetsLostDelta = Math.max(
+            0,
+            packetsLost - previousRtcStats.packetsLost
+          );
+          framesDecodedDelta = Math.max(
+            0,
+            framesDecoded - previousRtcStats.framesDecoded
+          );
+          framesDroppedDelta = Math.max(
+            0,
+            framesDropped - previousRtcStats.framesDropped
+          );
+
+          bitrateMbps = (bytesDelta * 8) / seconds / 1_000_000;
+
+          const packetTotal = packetsReceivedDelta + packetsLostDelta;
+          if (packetTotal > 0) {
+            packetLossPct = packetsLostDelta * 100 / packetTotal;
+          }
+
+          const frameTotal = framesDecodedDelta + framesDroppedDelta;
+          if (frameTotal > 0) {
+            dropPct = framesDroppedDelta * 100 / frameTotal;
+          }
+
+          if (!(fps > 0)) {
+            fps = framesDecodedDelta / seconds;
+          }
+
+          sampleValid = packetTotal >= 30 && framesDecodedDelta >= 1;
+        }
+
+        previousRtcStats = {
+          timestamp: nowMs,
+          bytesReceived: bytes,
+          packetsReceived,
+          packetsLost,
+          framesDecoded,
+          framesDropped
+        };
+
+        const payload = {
+          client_id: padClientId,
+          visibility: document.visibilityState,
+          sample_valid: sampleValid,
+          width: Number(inbound.frameWidth || videoFrame.videoWidth || 0),
+          height: Number(inbound.frameHeight || videoFrame.videoHeight || 0),
+          fps: Number(fps || 0),
+          bitrate_mbps: Number(bitrateMbps || 0),
+          packet_loss_pct: Number(packetLossPct || 0),
+          drop_pct: Number(dropPct || 0),
+          jitter_ms: Number(inbound.jitter || 0) * 1000,
+          packets_received_delta: packetsReceivedDelta,
+          frames_decoded_delta: framesDecodedDelta,
+          frames_dropped_delta: framesDroppedDelta,
+          codec,
+          connection_state:
+            pc.connectionState || pc.iceConnectionState || ""
+        };
+
+        fetch("/api/video/client_stats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          cache: "no-store",
+          keepalive: true
+        }).catch(() => {});
+      } catch (err) {
+        console.debug("getStats skipped:", err);
+      }
+    }
+
+    function resizeDetectionCanvas() {
+      const rect = videoFrameWrap.getBoundingClientRect();
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const targetW = Math.max(1, Math.round(rect.width * dpr));
+      const targetH = Math.max(1, Math.round(rect.height * dpr));
+
+      if (detectionCanvas.width !== targetW || detectionCanvas.height !== targetH) {
+        detectionCanvas.width = targetW;
+        detectionCanvas.height = targetH;
+        detectionCanvas.style.width = `${rect.width}px`;
+        detectionCanvas.style.height = `${rect.height}px`;
+      }
+
+      detectionCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function clearDetectionOverlay() {
+      resizeDetectionCanvas();
+      const w = detectionCanvas.clientWidth || videoFrameWrap.clientWidth;
+      const h = detectionCanvas.clientHeight || videoFrameWrap.clientHeight;
+      detectionCtx.clearRect(0, 0, w, h);
+    }
+
+    function getVideoDrawRect(frameW, frameH) {
+      const canvasW = detectionCanvas.clientWidth || videoFrameWrap.clientWidth;
+      const canvasH = detectionCanvas.clientHeight || videoFrameWrap.clientHeight;
+      const fw = Math.max(1, Number(frameW || latestVideoWidth || 1280));
+      const fh = Math.max(1, Number(frameH || latestVideoHeight || 720));
+      const scale = Math.min(canvasW / fw, canvasH / fh);
+      const drawW = fw * scale;
+      const drawH = fh * scale;
+      return {
+        scale,
+        offsetX: (canvasW - drawW) / 2,
+        offsetY: (canvasH - drawH) / 2,
+        canvasW,
+        canvasH,
+        frameW: fw,
+        frameH: fh
+      };
+    }
+
+    function buildClientDangerZone(frameW, frameH) {
+      const fw = Math.max(1, Number(frameW) || 1280);
+      const fh = Math.max(1, Number(frameH) || 720);
+      const x1 = fw / 6;
+      const x2 = fw * 5 / 6;
+      const splitX = fw / 2;
+      const y1 = fh * 7 / 8;
+      return {
+        frame_width: fw,
+        frame_height: fh,
+        left: { x1, y1, x2: splitX, y2: fh },
+        right: { x1: splitX, y1, x2, y2: fh }
+      };
+    }
+
+    function drawObstacleAvoidanceZones(yoloLayer = null) {
+      if (!isObstacleAvoidanceEnabled) return;
+
+      const frameW = Number(
+        (obstacleAvoidanceDangerZone && obstacleAvoidanceDangerZone.frame_width)
+        || (yoloLayer && yoloLayer.frame_width)
+        || latestVideoWidth
+        || 1280
+      );
+      const frameH = Number(
+        (obstacleAvoidanceDangerZone && obstacleAvoidanceDangerZone.frame_height)
+        || (yoloLayer && yoloLayer.frame_height)
+        || latestVideoHeight
+        || 720
+      );
+      const zone = obstacleAvoidanceDangerZone || buildClientDangerZone(frameW, frameH);
+      const rect = getVideoDrawRect(frameW, frameH);
+
+      const drawRegion = (region, label, strokeColor, fillColor, active) => {
+        if (!region) return;
+        const x = rect.offsetX + Number(region.x1) * rect.scale;
+        const y = rect.offsetY + Number(region.y1) * rect.scale;
+        const w = (Number(region.x2) - Number(region.x1)) * rect.scale;
+        const h = (Number(region.y2) - Number(region.y1)) * rect.scale;
+        if (w <= 0 || h <= 0) return;
+
+        detectionCtx.fillStyle = active ? fillColor.active : fillColor.idle;
+        detectionCtx.fillRect(x, y, w, h);
+        detectionCtx.strokeStyle = strokeColor;
+        detectionCtx.lineWidth = active ? 3 : 2;
+        detectionCtx.strokeRect(x, y, w, h);
+        detectionCtx.fillStyle = strokeColor;
+        detectionCtx.font = "bold 13px Microsoft YaHei, sans-serif";
+        detectionCtx.textBaseline = "top";
+        detectionCtx.fillText(label, x + 6, y + 5);
+      };
+
+      detectionCtx.save();
+      drawRegion(
+        zone.left,
+        "左区",
+        "#ffb347",
+        { idle: "rgba(255, 179, 71, 0.12)", active: "rgba(255, 126, 52, 0.32)" },
+        obstacleAvoidanceLeftOverlap
+      );
+      drawRegion(
+        zone.right,
+        "右区",
+        "#42d3e6",
+        { idle: "rgba(66, 211, 230, 0.11)", active: "rgba(36, 170, 224, 0.31)" },
+        obstacleAvoidanceRightOverlap
+      );
+      detectionCtx.restore();
+    }
+
+    function drawDetectionOverlay(data = null) {
+      let layers = [];
+
+      if (Array.isArray(data)) {
+        layers = data.filter(Boolean);
+      } else if (data) {
+        layers = [data];
+      } else {
+        layers = [latestYoloDetectionData, latestForeignDetectionData].filter(Boolean);
+      }
+
+      latestDetectionData = layers;
+      resizeDetectionCanvas();
+
+      const canvasW = detectionCanvas.clientWidth || videoFrameWrap.clientWidth;
+      const canvasH = detectionCanvas.clientHeight || videoFrameWrap.clientHeight;
+      detectionCtx.clearRect(0, 0, canvasW, canvasH);
+
+      const validLayers = layers.filter(layer => {
+        return layer && !layer.stale && Array.isArray(layer.boxes) && layer.boxes.length > 0;
+      });
+
+      drawObstacleAvoidanceZones(latestYoloDetectionData);
+
+      if (!validLayers.length) {
+        return;
+      }
+
+      detectionCtx.save();
+      detectionCtx.lineWidth = 2;
+      detectionCtx.font = "bold 13px Microsoft YaHei, Arial, sans-serif";
+      detectionCtx.textBaseline = "alphabetic";
+
+      let totalBoxes = 0;
+      const summaryParts = [];
+
+      for (const layer of validLayers) {
+        const backend = String(layer.backend || layer.mode || "").toLowerCase();
+        const isOpenCvForeign = backend.includes("opencv_dark_target") || backend.includes("dark_target");
+        const layerName = isOpenCvForeign ? "异物" : "YOLO坑洞";
+        const strokeColor = isOpenCvForeign ? "#00ff66" : "#ff0000";
+
+        const frameW = Number(layer.frame_width || latestVideoWidth || 1280);
+        const frameH = Number(layer.frame_height || latestVideoHeight || 720);
+        if (frameW > 0 && frameH > 0) {
+          latestVideoWidth = frameW;
+          latestVideoHeight = frameH;
+        }
+
+        const rect = getVideoDrawRect(frameW, frameH);
+        detectionCtx.strokeStyle = strokeColor;
+        detectionCtx.fillStyle = strokeColor;
+
+        let layerBoxes = 0;
+
+        for (const box of layer.boxes) {
+          const rawX = Number(box.x ?? box.x1 ?? 0);
+          const rawY = Number(box.y ?? box.y1 ?? 0);
+          let rawW = Number(box.w ?? 0);
+          let rawH = Number(box.h ?? 0);
+
+          if ((!rawW || !rawH) && box.x2 !== undefined && box.y2 !== undefined) {
+            rawW = Number(box.x2) - rawX;
+            rawH = Number(box.y2) - rawY;
+          }
+
+          const x = rect.offsetX + rawX * rect.scale;
+          const y = rect.offsetY + rawY * rect.scale;
+          const w = rawW * rect.scale;
+          const h = rawH * rect.scale;
+
+          if (w <= 0 || h <= 0) continue;
+
+          const label = box.label || box.class_name || layerName;
+          detectionCtx.strokeRect(x, y, w, h);
+          detectionCtx.fillText(label, x, Math.max(14, y - 5));
+
+          layerBoxes += 1;
+          totalBoxes += 1;
+        }
+
+        if (layerBoxes > 0) {
+          summaryParts.push(`${layerName}=${layerBoxes}`);
+        }
+      }
+
+      if (totalBoxes > 0) {
+        detectionCtx.font = "bold 14px Microsoft YaHei, Arial, sans-serif";
+        detectionCtx.fillStyle = "#ff0000";
+        detectionCtx.fillText(
+          `DETECTION: ${summaryParts.join("  ")}  total=${totalBoxes}`,
+          10,
+          Math.max(22, canvasH - 14)
+        );
+      }
+
+      detectionCtx.restore();
+    }
+
+    async function pollDetectionOverlay() {
+      let shouldDraw = false;
+
+      try {
+        const res = await fetch(`/api/detection_status?ts=${Date.now()}`, { cache: "no-store" });
+        const data = await res.json();
+
+        if (data.obstacle_avoidance && !isObstacleAvoidanceBusy) {
+          setObstacleAvoidanceState(data.obstacle_avoidance, false);
+        }
+
+        if (!data.ok) {
+          latestYoloDetectionData = null;
+          if (data.message) {
+            console.warn("detection_status:", data.message);
+          }
+        } else {
+          latestYoloDetectionData = data;
+          shouldDraw = true;
+
+          if (Number(data.frame_width) > 0 && Number(data.frame_height) > 0) {
+            latestVideoWidth = Number(data.frame_width);
+            latestVideoHeight = Number(data.frame_height);
+          }
+        }
+      } catch (e) {
+        console.warn("poll YOLO detection_status error:", e);
+      }
+
+      if (isDetectionEnabled) {
+        try {
+          const res = await fetch(`/api/foreign_detection_status?ts=${Date.now()}`, { cache: "no-store" });
+          const data = await res.json();
+
+          if (!data.ok) {
+            latestForeignDetectionData = null;
+            if (data.message) {
+              console.warn("foreign_detection_status:", data.message);
+            }
+          } else if (!data.enabled) {
+            latestForeignDetectionData = null;
+            setDetectionState(false);
+          } else {
+            latestForeignDetectionData = data;
+            shouldDraw = true;
+
+            if (Number(data.frame_width) > 0 && Number(data.frame_height) > 0) {
+              latestVideoWidth = Number(data.frame_width);
+              latestVideoHeight = Number(data.frame_height);
+            }
+          }
+        } catch (e) {
+          console.warn("poll OpenCV foreign_detection_status error:", e);
+        }
+      } else {
+        latestForeignDetectionData = null;
+      }
+
+      if (shouldDraw || latestYoloDetectionData || latestForeignDetectionData || isObstacleAvoidanceEnabled) {
+        drawDetectionOverlay();
+      } else {
+        clearDetectionOverlay();
+      }
+    }
+
+    function startDetectionOverlayPolling() {
+      if (detectionTimer) return;
+      pollDetectionOverlay();
+      detectionTimer = setInterval(pollDetectionOverlay, 160);
+    }
+
+    function stopDetectionOverlayPolling() {
+      if (detectionTimer) {
+        clearInterval(detectionTimer);
+        detectionTimer = null;
+      }
+      latestDetectionData = null;
+      latestYoloDetectionData = null;
+      latestForeignDetectionData = null;
+      clearDetectionOverlay();
+    }
+
+    function triggerDownload(url, filename = "") {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    async function postJson(url, body = {}) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.message || "请求失败");
+      }
+
+      return data;
+    }
+
+    async function postOnly(url) {
+      const res = await fetch(url, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.message || "请求失败");
+      }
+
+      return data;
+    }
+
+    function toggleFullscreen() {
+      const el = videoFrameWrap;
+
+      if (!document.fullscreenElement) {
+        el.requestFullscreen?.().catch(err => {
+          console.error("fullscreen error:", err);
+          setStreamStatus("进入全屏失败");
+        });
+      } else {
+        document.exitFullscreen?.().catch(err => {
+          console.error("exit fullscreen error:", err);
+        });
+      }
+    }
+
+    function setRecordingState(active) {
+      isRecording = !!active;
+      recordBtn.textContent = isRecording ? "结束录制" : "开始录制";
+      recordBtn.classList.toggle("recording", isRecording);
+    }
+
+    function setDetectionState(active) {
+      isDetectionEnabled = !!active;
+      detectionBtn.textContent = isDetectionEnabled ? "关闭识别" : "异物识别";
+      detectionBtn.classList.toggle("active-danger", isDetectionEnabled);
+
+      if (!isDetectionEnabled) {
+        latestForeignDetectionData = null;
+        drawDetectionOverlay();
+      }
+    }
+
+    function updateObstacleAvoidanceUI() {
+      const automaticMode = controlMode === "auto";
+
+      avoidanceBtn.disabled = isObstacleAvoidanceBusy || !automaticMode;
+      avoidanceBtn.textContent = isObstacleAvoidanceEnabled ? "关闭避障" : "自动避障";
+      avoidanceBtn.classList.toggle("active-auto", isObstacleAvoidanceEnabled);
+
+      if (!automaticMode) {
+        avoidanceBtn.title = "请先切换到自动模式";
+      } else if (isObstacleAvoidanceBusy) {
+        avoidanceBtn.title = "自动避障状态切换中";
+      } else if (isObstacleAvoidanceActive) {
+        const directionText = obstacleAvoidanceDirection === "right" ? "右" : "左";
+        avoidanceBtn.title = `自动避障执行中：${directionText}螺旋`;
+      } else if (isObstacleAvoidanceEnabled) {
+        avoidanceBtn.title = obstacleAvoidanceStatus || "自动避障运行中";
+      } else {
+        avoidanceBtn.title = "一键启动底层并开始自动避障";
+      }
+
+      Object.entries(moveButtons).forEach(([key, button]) => {
+        button.disabled = isObstacleAvoidanceEnabled && key !== "stop";
+      });
+    }
+
+    function setObstacleAvoidanceState(state = {}, redraw = true) {
+      if (Object.prototype.hasOwnProperty.call(state, "enabled")) {
+        isObstacleAvoidanceEnabled = !!state.enabled;
+      }
+      if (Object.prototype.hasOwnProperty.call(state, "active")) {
+        isObstacleAvoidanceActive = !!state.active;
+      }
+      if (typeof state.action === "string") {
+        obstacleAvoidanceAction = state.action;
+      }
+      if (typeof state.direction === "string") {
+        obstacleAvoidanceDirection = state.direction;
+      }
+      if (Object.prototype.hasOwnProperty.call(state, "left_overlap")) {
+        obstacleAvoidanceLeftOverlap = !!state.left_overlap;
+      }
+      if (Object.prototype.hasOwnProperty.call(state, "right_overlap")) {
+        obstacleAvoidanceRightOverlap = !!state.right_overlap;
+      }
+      if (typeof state.status === "string") {
+        obstacleAvoidanceStatus = state.status;
+      }
+      if (typeof state.last_error === "string") {
+        obstacleAvoidanceError = state.last_error;
+      }
+      if (Object.prototype.hasOwnProperty.call(state, "danger_zone")) {
+        obstacleAvoidanceDangerZone = state.danger_zone && typeof state.danger_zone === "object"
+          ? state.danger_zone
+          : null;
+      }
+
+      if (!isObstacleAvoidanceEnabled) {
+        isObstacleAvoidanceActive = false;
+        obstacleAvoidanceAction = "idle";
+        obstacleAvoidanceDirection = "none";
+        obstacleAvoidanceLeftOverlap = false;
+        obstacleAvoidanceRightOverlap = false;
+        obstacleAvoidanceDangerZone = null;
+      }
+
+      updateObstacleAvoidanceUI();
+      if (redraw) drawDetectionOverlay();
+    }
+
+    function setCleaningState(active) {
+      isCleaning = !!active;
+      cleaningBtn.textContent = isCleaning ? "结束清理" : "异物清理";
+      cleaningBtn.classList.toggle("active-danger", isCleaning);
+    }
+
+    function setRobotRunningState(active) {
+      isRobotRunning = !!active;
+      robotToggleBtn.textContent = isRobotRunning ? "停止" : "启动";
+      robotToggleBtn.classList.toggle("running", isRobotRunning);
+
+      if (!isRobotRunning) {
+        stopMoveDirection();
+      }
+    }
+
+    function setSpeedDisplay(value) {
+      const num = Number(value) || 0;
+      currentSpeed = num;
+      speedValue.textContent = num.toFixed(2);
+      speedInput.value = num.toFixed(2);
+      speedSlider.value = num.toFixed(2);
+    }
+
+    function previewSpeed(value) {
+      const num = Number(value) || 0;
+      speedValue.textContent = num.toFixed(2);
+      speedInput.value = num.toFixed(2);
+    }
+
+    function setControlModeTheme(mode) {
+      const cfg = CONTROL_MODES[mode] || CONTROL_MODES.manual;
+      document.documentElement.style.setProperty("--control-mode-color", cfg.color);
+      document.documentElement.style.setProperty("--control-mode-hover", cfg.hover);
+      document.documentElement.style.setProperty("--control-mode-active", cfg.active);
+    }
+
+    function updateControlModeUI() {
+      const cfg = CONTROL_MODES[controlMode];
+      const visibleSet = new Set(cfg.visibleButtons);
+
+      setControlModeTheme(controlMode);
+
+      modeToggleBtn.textContent = cfg.label;
+      modeToggleBtn.title = controlMode === "manual" ? "点击切换到自动模式" : "点击切换到手控模式";
+
+      movePad.classList.toggle("manual-layout", controlMode === "manual");
+      movePad.classList.toggle("auto-layout", controlMode === "auto");
+
+      const labels = controlMode === "auto"
+        ? { forward: "前进", stop: "停止", backward: "后退" }
+        : { forward: "前进", left: "左转", stop: "停止", right: "右转", backward: "后退" };
+
+      Object.entries(moveButtons).forEach(([key, btn]) => {
+        const visible = visibleSet.has(key);
+        btn.classList.toggle("is-hidden", !visible);
+        btn.classList.toggle("mode-enabled", visible);
+
+        const label = btn.querySelector(".inline-label");
+        if (label) label.textContent = labels[key];
+        btn.title = labels[key];
+
+        if (!visible) {
+          btn.classList.remove("holding");
+        }
+      });
+
+      updateObstacleAvoidanceUI();
+    }
+
+    function canMoveDirection(direction) {
+      if (!isRobotRunning) return false;
+      if (isObstacleAvoidanceEnabled) return false;
+      const cfg = CONTROL_MODES[controlMode];
+      return cfg.movableDirections.includes(direction);
+    }
+
+    function canUseStopButton() {
+      return isRobotRunning && controlMode === "auto";
+    }
+
+    async function setSpeed(value) {
+      const num = Math.max(0, Math.min(0.5, Number(value) || 0));
+      setSpeedDisplay(num);
+
+      try {
+        const data = await postJson("/api/set_speed", { speed: num });
+        const actual = typeof data.speed !== "undefined" ? Number(data.speed) : num;
+        setSpeedDisplay(actual);
+        updateStreamStatusFromBasic(data);
+      } catch (e) {
+        console.error("setSpeed error:", e);
+        setStreamStatus(`速度设置失败：${e.message || e}`);
+      }
+    }
+
+    async function toggleRobotMotion() {
+      if (isRobotBusy) return;
+      isRobotBusy = true;
+      robotToggleBtn.disabled = true;
+
+      try {
+        if (isRobotRunning) {
+          cancelAutoMotionSelection();
+          stopMoveDirection();
+          await waitForMovementRequests();
+          const data = await postOnly("/api/robot_stop");
+          setObstacleAvoidanceState({ enabled: false, active: false });
+          setRobotRunningState(false);
+          setStreamStatus(data.message || "机器人已停止");
+        } else {
+          const data = await postOnly("/api/robot_start");
+          setRobotRunningState(true);
+          setStreamStatus(data.message || "机器人已启动");
+        }
+      } catch (e) {
+        console.error("toggleRobotMotion error:", e);
+        setStreamStatus(`运动控制失败：${e.message || e}`);
+      } finally {
+        isRobotBusy = false;
+        robotToggleBtn.disabled = false;
+        await loadStatus();
+      }
+    }
+
+    function enqueueMovementRequest(task, generation) {
+      const run = movementRequestChain
+        .catch(() => null)
+        .then(() => {
+          if (generation !== movementRequestGeneration) return null;
+          return task();
+        });
+
+      movementRequestChain = run.catch(() => null);
+      return run;
+    }
+
+    function waitForMovementRequests() {
+      return movementRequestChain.catch(() => null);
+    }
+
+    function invalidateMovementRequests() {
+      movementRequestGeneration += 1;
+      return movementRequestGeneration;
+    }
+
+    function cancelAutoMotionSelection() {
+      autoMotionRequestId += 1;
+    }
+
+    function sendDirectionCommand(direction) {
+      currentDirection = direction;
+      const generation = movementRequestGeneration;
+
+      return enqueueMovementRequest(async () => {
+        const body = { direction };
+
+        if (direction === "left" || direction === "right") {
+          body.turnScale = TURN_SCALE;
+        }
+
+        return postJson("/api/move", body);
+      }, generation).catch((e) => {
+        console.error("sendDirectionCommand error:", e);
+        setStreamStatus(`方向控制失败：${e.message || e}`);
+        return null;
+      });
+    }
+
+    function stopDirectionCommand() {
+      currentDirection = null;
+      const generation = movementRequestGeneration;
+      return enqueueMovementRequest(() => postOnly("/api/move_stop"), generation)
+        .catch((e) => {
+        console.error("stopDirectionCommand error:", e);
+        setStreamStatus(`停止控制失败：${e.message || e}`);
+        return null;
+      });
+    }
+
+    function startMoveDirection(direction, buttonEl, sendStopBeforeStart = false) {
+      if (!canMoveDirection(direction)) return;
+
+      if (currentDirection === direction && directionRunning) return;
+
+      stopMoveDirection(sendStopBeforeStart);
+
+      directionRunning = true;
+      currentDirection = direction;
+      directionButton = buttonEl || null;
+
+      if (directionButton) directionButton.classList.add("holding");
+
+      sendDirectionCommand(direction);
+
+      directionTimer = setInterval(() => {
+        sendDirectionCommand(direction);
+      }, 260);
+    }
+
+    function stopMoveDirection(sendStop = true) {
+      invalidateMovementRequests();
+
+      if (directionTimer) {
+        clearInterval(directionTimer);
+        directionTimer = null;
+      }
+
+      if (directionButton) {
+        directionButton.classList.remove("holding");
+        directionButton = null;
+      }
+
+      const hadDirection = directionRunning || currentDirection;
+      if (hadDirection) {
+        directionRunning = false;
+        currentDirection = null;
+        if (sendStop) {
+          stopDirectionCommand();
+        }
+      }
+    }
+
+    async function handleStopDirection(buttonEl) {
+      if (!canUseStopButton()) return;
+
+      if (buttonEl) {
+        buttonEl.classList.add("holding");
+        setTimeout(() => {
+          buttonEl.classList.remove("holding");
+        }, 140);
+      }
+
+      if (isObstacleAvoidanceEnabled) {
+        await stopObstacleAvoidance();
+        return;
+      }
+
+      if (directionTimer || directionRunning || currentDirection) {
+        cancelAutoMotionSelection();
+        stopMoveDirection();
+        setStreamStatus("机器人已停止移动");
+        return;
+      }
+
+      cancelAutoMotionSelection();
+      invalidateMovementRequests();
+      const data = await stopDirectionCommand();
+      setStreamStatus((data && data.message) || "机器人已停止移动");
+    }
+
+    async function handleAutoMotionPress(direction, buttonEl) {
+      const action = {
+        forward: { mode: "straight", travel: "forward" },
+        backward: { mode: "straight", travel: "backward" },
+      }[direction];
+
+      if (!action || !canMoveDirection(direction)) return;
+
+      if (autoMotionMode === action.mode && currentDirection === action.travel && directionRunning) {
+        return;
+      }
+
+      // Remove the old watchdog without racing it against the new forward command.
+      stopMoveDirection(false);
+      const requestId = ++autoMotionRequestId;
+
+      try {
+        const data = await postJson("/api/auto_motion_mode", { mode: action.mode });
+        if (requestId !== autoMotionRequestId || controlMode !== "auto" || !isRobotRunning) return;
+        autoMotionMode = AUTO_MOTION_LABELS[data.auto_motion_mode]
+          ? data.auto_motion_mode
+          : action.mode;
+
+        startMoveDirection(action.travel, buttonEl, false);
+        updateControlModeUI();
+        setStreamStatus(`自动模式：${AUTO_MOTION_LABELS[autoMotionMode]}持续运行中`);
+      } catch (e) {
+        if (requestId !== autoMotionRequestId || controlMode !== "auto" || !isRobotRunning) return;
+        console.error("handleAutoMotionPress error:", e);
+        setStreamStatus(`自动轨迹选择失败：${e.message || e}`);
+      }
+    }
+
+    async function handleDirectionPress(direction, buttonEl) {
+      if (isObstacleAvoidanceEnabled) return;
+      if (!canMoveDirection(direction)) return;
+
+      if (controlMode === "auto") {
+        await handleAutoMotionPress(direction, buttonEl);
+        return;
+      }
+
+      startMoveDirection(direction, buttonEl);
+    }
+
+
+    function handleDirectionRelease() {
+      if (controlMode === "auto") return;
+      stopMoveDirection();
+    }
+
+    async function changeFanSpeed(delta) {
+      try {
+        const nextFanSpeed = Math.max(FAN_MIN, Math.min(FAN_MAX, currentFanSpeed + delta));
+        const actualDelta = nextFanSpeed - currentFanSpeed;
+
+        if (actualDelta === 0) {
+          fanSpeedValue.textContent = currentFanSpeed;
+          setStreamStatus(`风扇速度已到边界：${currentFanSpeed}`);
+          return;
+        }
+
+        const data = await postJson("/api/fan_speed_step", { delta: actualDelta });
+
+        if (typeof data.fan_speed !== "undefined") {
+          currentFanSpeed = Math.max(FAN_MIN, Math.min(FAN_MAX, Number(data.fan_speed) || 0));
+          fanSpeedValue.textContent = currentFanSpeed;
+        } else {
+          currentFanSpeed = nextFanSpeed;
+          fanSpeedValue.textContent = currentFanSpeed;
+        }
+
+        setStreamStatus(data.message || "机器人风扇速度已更新");
+      } catch (e) {
+        console.error("changeFanSpeed error:", e);
+        setStreamStatus(`风扇调速失败：${e.message || e}`);
+      }
+    }
+
+    async function resetFanSpeed() {
+      try {
+        const data = await postOnly("/api/fan_speed_reset");
+        currentFanSpeed = typeof data.fan_speed !== "undefined"
+          ? Math.max(FAN_MIN, Math.min(FAN_MAX, Number(data.fan_speed) || 0))
+          : 0;
+
+        fanSpeedValue.textContent = currentFanSpeed;
+        setStreamStatus(data.message || "机器人风扇速度已重置");
+      } catch (e) {
+        console.error("resetFanSpeed error:", e);
+        setStreamStatus(`风扇重置失败：${e.message || e}`);
+      }
+    }
+
+
+    function setGimbalUiStatus(message, state = "ready") {
+      const safeMessage = String(message || "");
+
+      if (gimbalUiStatus) {
+        gimbalUiStatus.textContent = safeMessage;
+      }
+
+      if (gimbalLinkState) {
+        const labels = {
+          checking: "连接检测",
+          connected: "云台已连接",
+          ready: "控制就绪",
+          warning: "姿态异常",
+          moving: "执行中",
+          stopping: "正在停止",
+          error: "控制异常"
+        };
+        gimbalLinkState.textContent = labels[state] || labels.ready;
+        gimbalLinkState.dataset.state = state;
+        gimbalLinkState.title = safeMessage;
+      }
+    }
+
+    function applyGimbalConnectionState(gimbal = {}, fallbackMessage = "") {
+      const tcpReachable = (
+        typeof gimbal.tcp_reachable !== "undefined"
+          ? !!gimbal.tcp_reachable
+          : !!gimbal.connected
+      );
+
+      const controlReady = !!gimbal.control_ready;
+      const tcpError = String(gimbal.tcp_error || "");
+      const controlError = String(
+        gimbal.control_error || gimbal.last_error || ""
+      );
+
+      const modeText = gimbal.mode_name
+        ? `（${gimbal.mode_name}）`
+        : "";
+
+      if (!tcpReachable) {
+        setGimbalUiStatus(
+          `云台 TCP 未连接：${tcpError || controlError || fallbackMessage || "请检查 IP、端口和网络"}`,
+          "error"
+        );
+        return;
+      }
+
+      // 只有当前控制状态确实未恢复时，才显示“控制异常”。
+      if (controlError && gimbal.control_ready === false) {
+        setGimbalUiStatus(
+          `云台已连接${modeText}，但控制尚未恢复：${controlError}`,
+          "error"
+        );
+        return;
+      }
+
+      // 历史 pose_error 不参与普通状态轮询。
+      // 姿态异常只在用户主动点击“读取姿态”时提示，
+      // 避免姿态查询问题污染已经稳定的方向控制状态。
+      if (controlReady) {
+        setGimbalUiStatus(
+          `云台连接正常${modeText}，控制就绪。`,
+          "ready"
+        );
+      } else if (gimbal.busy) {
+        setGimbalUiStatus(
+          `云台已连接${modeText}，正在执行控制动作。`,
+          "moving"
+        );
+      } else {
+        setGimbalUiStatus(
+          `G1 TCP 已连接${modeText}，可进行云台控制。`,
+          "connected"
+        );
+      }
+    }
+
+    let gimbalLastPose = null;
+
+    function updateGimbalPose(pose = {}) {
+      if (!pose || typeof pose !== "object") return;
+      gimbalLastPose = { ...pose };
+    }
+
+    function updateGimbalPoseFromData(data = {}) {
+      const pose = data.gimbal_pose
+        || data.pose
+        || (data.gimbal && data.gimbal.pose)
+        || null;
+
+      if (pose && typeof pose === "object") {
+        updateGimbalPose(pose);
+      }
+    }
+
+    function clampGimbalSpeed(value) {
+      const parsed = Math.round(Number(value));
+      if (!Number.isFinite(parsed)) return gimbalSpeed;
+      return Math.max(1, Math.min(128, parsed));
+    }
+
+    function syncGimbalSpeedFromSlider(value) {
+      gimbalSpeed = clampGimbalSpeed(value);
+      if (gimbalSpeedSlider) gimbalSpeedSlider.value = String(gimbalSpeed);
+      if (gimbalSpeedInput) gimbalSpeedInput.value = String(gimbalSpeed);
+    }
+
+    function syncGimbalSpeedFromInput(value) {
+      syncGimbalSpeedFromSlider(value);
+    }
+
+    function getGimbalDirectionLabel(axis, direction) {
+      const labels = {
+        yaw: direction < 0 ? "左转" : "右转",
+        pitch: direction < 0 ? "低头" : "抬头"
+      };
+      return labels[axis] || "云台运动";
+    }
+
+    function setGimbalControlsDisabled(disabled) {
+      document.querySelectorAll(".gimbal-jog-btn").forEach((button) => {
+        button.disabled = !!disabled;
+      });
+
+      const readButton = document.querySelector(".gimbal-read-btn");
+      const resetButton = document.querySelector(".gimbal-header-reset");
+      if (readButton) readButton.disabled = !!disabled;
+      if (resetButton) resetButton.disabled = !!disabled;
+    }
+
+    function setGimbalAuxControlsDisabled(disabled) {
+      const readButton = document.querySelector(".gimbal-read-btn");
+      const resetButton = document.querySelector(".gimbal-header-reset");
+      if (readButton) readButton.disabled = !!disabled;
+      if (resetButton) resetButton.disabled = !!disabled;
+    }
+
+    function gimbalSleep(ms) {
+      return new Promise((resolve) => {
+        window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+      });
+    }
+
+    async function gimbalApiRequest(url, options = {}) {
+      const controller = new AbortController();
+      const callerSignal = options.signal || null;
+      const timeoutMs = Number(options.timeoutMs || GIMBAL_API_TIMEOUT_MS);
+
+      let callerAbortHandler = null;
+      if (callerSignal) {
+        if (callerSignal.aborted) {
+          controller.abort();
+        } else {
+          callerAbortHandler = () => controller.abort();
+          callerSignal.addEventListener("abort", callerAbortHandler, {
+            once: true
+          });
+        }
+      }
+
+      const timer = window.setTimeout(() => {
+        controller.abort();
+      }, Math.max(1000, timeoutMs));
+
+      try {
+        const fetchOptions = {
+          cache: "no-store",
+          ...options,
+          signal: controller.signal
+        };
+        delete fetchOptions.timeoutMs;
+
+        const response = await fetch(url, fetchOptions);
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || !data.ok) {
+          const error = new Error(
+            data.message || `请求失败（HTTP ${response.status}）`
+          );
+          error.data = data;
+          error.httpStatus = response.status;
+          throw error;
+        }
+
+        return data;
+
+      } catch (error) {
+        if (error && error.name === "AbortError") {
+          const timeoutError = new Error(
+            `云台请求超过 ${Math.round(timeoutMs / 1000)} 秒未完成`
+          );
+          timeoutError.data = {
+            ok: false,
+            timeout: true
+          };
+          throw timeoutError;
+        }
+        throw error;
+
+      } finally {
+        window.clearTimeout(timer);
+        if (callerSignal && callerAbortHandler) {
+          callerSignal.removeEventListener(
+            "abort",
+            callerAbortHandler
+          );
+        }
+      }
+    }
+
+    function getGimbalQueuedCount() {
+      return gimbalCommandQueue.length + (gimbalQueueRunning ? 1 : 0);
+    }
+
+    function clearPendingGimbalCommands() {
+      gimbalCommandQueue.length = 0;
+    }
+
+    async function executeQueuedGimbalCommand(item, generation) {
+      const {
+        axis,
+        direction,
+        buttonEl,
+        speed
+      } = item;
+
+      const label = getGimbalDirectionLabel(axis, direction);
+
+      gimbalActiveButton = buttonEl || null;
+      if (gimbalActiveButton) {
+        gimbalActiveButton.classList.add("holding");
+      }
+
+      if (generation === gimbalUiGeneration) {
+        setGimbalUiStatus(
+          `正在执行${label}，速度 ${speed}/128；动作结束后自动停止。`,
+          "moving"
+        );
+      }
+
+      try {
+        const data = await gimbalApiRequest("/api/gimbal/jog/pulse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            axis,
+            direction,
+            speed,
+            duration_ms: 250
+          })
+        });
+
+        if (generation !== gimbalUiGeneration) {
+          return;
+        }
+
+        // 控制动作不再自动查询姿态；只有服务端明确声明 pose_fresh
+        // 才用返回值刷新角度，避免把旧缓存当成实时姿态。
+        if (data.pose_fresh) {
+          updateGimbalPoseFromData(data);
+        }
+
+        const message = data.interrupted
+          ? `${label}已被停止，控制就绪。`
+          : (data.message || `${label}完成，控制就绪。`);
+
+        setGimbalUiStatus(message, "ready");
+
+      } catch (error) {
+        console.error("executeQueuedGimbalCommand error:", error);
+
+        if (generation !== gimbalUiGeneration) {
+          return;
+        }
+
+        const payload = error && error.data ? error.data : {};
+        const gimbal = payload.gimbal || {};
+        const tcpReachable = (
+          typeof gimbal.tcp_reachable !== "undefined"
+            ? !!gimbal.tcp_reachable
+            : !!gimbal.connected
+        );
+
+        if (payload.recovered && tcpReachable) {
+          setGimbalUiStatus(
+            `本次${label}未确认，但后端已自动 Stop 并恢复；可以继续控制。`,
+            "warning"
+          );
+        } else if (payload.timeout) {
+          clearPendingGimbalCommands();
+          setGimbalUiStatus(
+            `本次${label}请求超时，正在自动执行安全停止。`,
+            "warning"
+          );
+          window.setTimeout(() => {
+            stopGimbalJog(false).catch((stopError) => {
+              console.error("automatic safety stop error:", stopError);
+            });
+          }, 0);
+        } else {
+          clearPendingGimbalCommands();
+          setGimbalUiStatus(
+            `控制异常：${error.message || error}；正在自动尝试停止。`,
+            "error"
+          );
+          window.setTimeout(() => {
+            stopGimbalJog(false).catch((stopError) => {
+              console.error("automatic safety stop error:", stopError);
+            });
+          }, 0);
+        }
+
+      } finally {
+        if (gimbalActiveButton === buttonEl && gimbalActiveButton) {
+          gimbalActiveButton.classList.remove("holding");
+          gimbalActiveButton = null;
+        }
+      }
+    }
+
+    async function drainGimbalCommandQueue() {
+      if (gimbalQueueRunning || gimbalStopInFlight) {
+        return;
+      }
+
+      gimbalQueueRunning = true;
+      gimbalBusy = true;
+      setGimbalAuxControlsDisabled(true);
+
+      try {
+        while (
+          gimbalCommandQueue.length > 0
+          && !gimbalStopInFlight
+        ) {
+          const item = gimbalCommandQueue.shift();
+          const generation = gimbalUiGeneration;
+
+          await executeQueuedGimbalCommand(item, generation);
+          gimbalLastCommandFinishedAt = Date.now();
+
+          if (
+            generation !== gimbalUiGeneration
+            || gimbalStopInFlight
+          ) {
+            break;
+          }
+
+          const elapsed = Date.now() - gimbalLastCommandFinishedAt;
+          const remaining = Math.max(
+            0,
+            GIMBAL_CLIENT_GAP_MS - elapsed
+          );
+          if (remaining > 0) {
+            await gimbalSleep(remaining);
+          }
+        }
+
+      } finally {
+        gimbalQueueRunning = false;
+
+        if (!gimbalStopInFlight) {
+          gimbalBusy = false;
+          setGimbalAuxControlsDisabled(false);
+        }
+
+        // 若等待期间又有新点击，继续按串行顺序处理。
+        if (
+          gimbalCommandQueue.length > 0
+          && !gimbalStopInFlight
+        ) {
+          drainGimbalCommandQueue().catch((error) => {
+            console.error("restart gimbal queue error:", error);
+          });
+        }
+      }
+    }
+
+    function jogGimbalOnce(axis, direction, buttonEl) {
+      if (gimbalStopInFlight) {
+        setGimbalUiStatus(
+          "正在停止云台，请等待停止完成后再继续。",
+          "stopping"
+        );
+        return;
+      }
+
+      const normalizedDirection = Number(direction) < 0 ? -1 : 1;
+      const label = getGimbalDirectionLabel(
+        axis,
+        normalizedDirection
+      );
+
+      if (gimbalCommandQueue.length >= GIMBAL_MAX_PENDING_COMMANDS) {
+        setGimbalUiStatus(
+          `点击过快：已有 ${GIMBAL_MAX_PENDING_COMMANDS} 条控制指令等待执行，为避免云台过载，本次点击已忽略。`,
+          "warning"
+        );
+        return;
+      }
+
+      if (axis !== "yaw" && axis !== "pitch") {
+        setGimbalUiStatus("当前页面只保留抬头、低头、左转、右转控制。", "warning");
+        return;
+      }
+
+      gimbalCommandQueue.push({
+        axis,
+        direction: normalizedDirection,
+        buttonEl: buttonEl || null,
+        speed: gimbalSpeed
+      });
+
+      if (gimbalQueueRunning) {
+        setGimbalUiStatus(
+          `${label}已进入串行队列，当前等待 ${gimbalCommandQueue.length} 条。`,
+          "moving"
+        );
+      }
+
+      drainGimbalCommandQueue().catch((error) => {
+        console.error("drainGimbalCommandQueue error:", error);
+        gimbalBusy = false;
+        gimbalQueueRunning = false;
+        setGimbalAuxControlsDisabled(false);
+        setGimbalUiStatus(
+          `云台队列异常：${error.message || error}`,
+          "error"
+        );
+      });
+    }
+
+    async function stopGimbalJog(forceMessage = false) {
+      if (gimbalStopInFlight) return;
+
+      // Stop 会使所有“旧控制请求”的迟到响应失效。
+      clearPendingGimbalCommands();
+      const generation = ++gimbalUiGeneration;
+
+      gimbalStopInFlight = true;
+      gimbalBusy = true;
+      setGimbalAuxControlsDisabled(true);
+
+      if (forceMessage || gimbalQueueRunning) {
+        setGimbalUiStatus("正在执行云台安全停止...", "stopping");
+      }
+
+      try {
+        const data = await gimbalApiRequest("/api/gimbal/jog/stop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}"
+        });
+
+        if (generation === gimbalUiGeneration) {
+          if (data.pose_fresh) {
+            updateGimbalPoseFromData(data);
+          }
+          setGimbalUiStatus(
+            "云台已停止，队列已清空，控制就绪。",
+            "ready"
+          );
+        }
+
+      } catch (error) {
+        console.error("stopGimbalJog error:", error);
+
+        if (generation === gimbalUiGeneration) {
+          setGimbalUiStatus(
+            `停止异常：${error.message || error}`,
+            "error"
+          );
+        }
+
+      } finally {
+        gimbalStopInFlight = false;
+
+        if (!gimbalQueueRunning) {
+          gimbalBusy = false;
+          setGimbalAuxControlsDisabled(false);
+        }
+      }
+    }
+
+    async function requestGimbalPose() {
+      if (
+        gimbalBusy
+        || gimbalQueueRunning
+        || gimbalCommandQueue.length > 0
+        || gimbalStopInFlight
+      ) {
+        setGimbalUiStatus(
+          "请等待当前云台控制完成后再读取姿态。",
+          "moving"
+        );
+        return;
+      }
+
+      const generation = ++gimbalUiGeneration;
+      gimbalBusy = true;
+      setGimbalControlsDisabled(true);
+      setGimbalUiStatus("正在单独读取云台姿态...", "checking");
+
+      try {
+        const data = await gimbalApiRequest("/api/gimbal/pose");
+        if (generation !== gimbalUiGeneration) return;
+
+        updateGimbalPoseFromData(data);
+        console.info("G1 pose diagnostic:", gimbalLastPose);
+        setGimbalUiStatus(
+          "姿态读取成功；数值不在主界面常驻显示，方向控制保持就绪。",
+          "ready"
+        );
+
+      } catch (error) {
+        console.error("requestGimbalPose error:", error);
+
+        if (generation === gimbalUiGeneration) {
+          setGimbalUiStatus(
+            `姿态读取异常（方向控制仍保持独立）：${error.message || error}`,
+            "warning"
+          );
+        }
+
+      } finally {
+        if (generation === gimbalUiGeneration) {
+          gimbalBusy = false;
+          setGimbalControlsDisabled(false);
+        }
+      }
+    }
+
+    async function resetGimbalHome() {
+      if (
+        gimbalBusy
+        || gimbalQueueRunning
+        || gimbalStopInFlight
+      ) {
+        setGimbalUiStatus(
+          "请等待当前方向动作自动停止后再执行回中。",
+          "moving"
+        );
+        return;
+      }
+
+      clearPendingGimbalCommands();
+      const generation = ++gimbalUiGeneration;
+
+      gimbalBusy = true;
+      setGimbalControlsDisabled(true);
+      setGimbalUiStatus("正在停止并恢复云台初始位姿...", "moving");
+
+      try {
+        const data = await gimbalApiRequest("/api/gimbal/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}"
+        });
+
+        if (generation !== gimbalUiGeneration) return;
+
+        updateGimbalPoseFromData(data);
+        setGimbalUiStatus(
+          data.message || "视角重置完成，控制就绪。",
+          "ready"
+        );
+
+      } catch (error) {
+        console.error("resetGimbalHome error:", error);
+
+        if (generation !== gimbalUiGeneration) return;
+
+        const payload = error && error.data ? error.data : {};
+        if (payload.recovered) {
+          setGimbalUiStatus(
+            "回中命令未确认，但后端已自动 Stop 并恢复控制。",
+            "warning"
+          );
+        } else {
+          setGimbalUiStatus(
+            `视角重置失败：${error.message || error}`,
+            "error"
+          );
+        }
+
+      } finally {
+        if (generation === gimbalUiGeneration) {
+          gimbalBusy = false;
+          setGimbalControlsDisabled(false);
+        }
+      }
+    }
+
+    async function initializeGimbalControl() {
+      syncGimbalSpeedFromInput(
+        gimbalSpeedInput ? gimbalSpeedInput.value : 17
+      );
+
+      setGimbalUiStatus(
+        "正在检测 G1 云台 TCP 控制连接...",
+        "checking"
+      );
+
+      try {
+        // 启动只探测固定地址 172.20.10.8:8888。
+        // 不读取姿态、不切换模式、不发送运动命令。
+        const data = await gimbalApiRequest(
+          "/api/gimbal/status?probe=1&refresh=0"
+        );
+
+        updateGimbalPoseFromData(data);
+        applyGimbalConnectionState(
+          data.gimbal || {},
+          data.message || ""
+        );
+
+      } catch (error) {
+        console.error("initializeGimbalControl error:", error);
+        setGimbalUiStatus(
+          `云台 TCP 连接异常：${error.message || error}`,
+          "error"
+        );
+      }
+    }
+
+
+    function sendGimbalStopOnPageExit() {
+      const url = "/api/gimbal/jog/stop";
+      try {
+        if (navigator.sendBeacon) {
+          const blob = new Blob(["{}"], { type: "application/json" });
+          navigator.sendBeacon(url, blob);
+          return;
+        }
+      } catch (error) {
+        console.debug("sendBeacon stop failed:", error);
+      }
+
+      try {
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+          keepalive: true
+        }).catch(() => {});
+      } catch (_) {
+        // 页面退出阶段忽略网络异常。
+      }
+    }
+
+    async function capturePhoto() {
+      if (isRecordingBusy) return;
+
+      photoBtn.disabled = true;
+      try {
+        setStreamStatus("拍照中...");
+        const data = await postOnly("/api/capture_photo");
+        if (data.download_url) {
+          triggerDownload(data.download_url, data.filename || "");
+        }
+        setStreamStatus(`照片已保存：${data.filename || "拍照成功"}`);
+      } catch (e) {
+        console.error("capturePhoto error:", e);
+        setStreamStatus(`拍照失败：${e.message || e}`);
+      } finally {
+        photoBtn.disabled = false;
+        await loadStatus();
+      }
+    }
+
+    async function startRecording() {
+      if (isRecordingBusy || isRecording) return;
+
+      isRecordingBusy = true;
+      recordBtn.disabled = true;
+
+      try {
+        setStreamStatus("开始录制中...");
+        const data = await postOnly("/api/start_recording");
+        setRecordingState(true);
+        setStreamStatus(`录制中：${data.filename || "视频录制已开始"}`);
+      } catch (e) {
+        console.error("startRecording error:", e);
+        setStreamStatus(`开始录制失败：${e.message || e}`);
+      } finally {
+        isRecordingBusy = false;
+        recordBtn.disabled = false;
+        await loadStatus();
+      }
+    }
+
+    async function stopRecording() {
+      if (isRecordingBusy || !isRecording) return;
+
+      isRecordingBusy = true;
+      recordBtn.disabled = true;
+
+      try {
+        setStreamStatus("结束录制中...");
+        const data = await postOnly("/api/stop_recording");
+        setRecordingState(false);
+
+        if (data.download_url) {
+          triggerDownload(data.download_url, data.filename || "");
+        }
+
+        setStreamStatus(`录像已保存：${data.filename || "录制完成"}`);
+      } catch (e) {
+        console.error("stopRecording error:", e);
+        setStreamStatus(`结束录制失败：${e.message || e}`);
+      } finally {
+        isRecordingBusy = false;
+        recordBtn.disabled = false;
+        await loadStatus();
+      }
+    }
+
+    async function toggleRecording() {
+      if (isRecording) {
+        await stopRecording();
+      } else {
+        await startRecording();
+      }
+    }
+
+    async function startDetection() {
+      if (isDetectionBusy || isDetectionEnabled) return;
+
+      isDetectionBusy = true;
+      detectionBtn.disabled = true;
+
+      try {
+        setStreamStatus("异物识别启动中...");
+        const data = await postOnly("/api/start_foreign_detection");
+        setDetectionState(true);
+        setStreamStatus(data.message || "异物识别已开启");
+      } catch (e) {
+        console.error("startDetection error:", e);
+        setDetectionState(false);
+        setStreamStatus(`开启异物识别失败：${e.message || e}`);
+      } finally {
+        isDetectionBusy = false;
+        detectionBtn.disabled = false;
+        await loadStatus();
+      }
+    }
+
+    async function stopDetection() {
+      if (isDetectionBusy || !isDetectionEnabled) return;
+
+      isDetectionBusy = true;
+      detectionBtn.disabled = true;
+
+      try {
+        setStreamStatus("异物识别关闭中...");
+        const data = await postOnly("/api/stop_foreign_detection");
+        setDetectionState(false);
+        setStreamStatus(data.message || "异物识别已关闭");
+      } catch (e) {
+        console.error("stopDetection error:", e);
+        setStreamStatus(`关闭异物识别失败：${e.message || e}`);
+      } finally {
+        isDetectionBusy = false;
+        detectionBtn.disabled = false;
+        await loadStatus();
+      }
+    }
+
+    async function toggleDetection() {
+      if (isDetectionEnabled) {
+        await stopDetection();
+      } else {
+        await startDetection();
+      }
+    }
+
+    async function startObstacleAvoidance() {
+      if (isObstacleAvoidanceBusy || isObstacleAvoidanceEnabled) return;
+      if (controlMode !== "auto") {
+        setStreamStatus("请先切换到自动模式");
+        return;
+      }
+
+      isObstacleAvoidanceBusy = true;
+      updateObstacleAvoidanceUI();
+      cancelAutoMotionSelection();
+      stopMoveDirection();
+
+      try {
+        await waitForMovementRequests();
+        setStreamStatus("自动避障一键启动中...");
+        const data = await postJson("/api/obstacle_avoidance", { enabled: true });
+        setObstacleAvoidanceState(data);
+        setRobotRunningState(!!data.robot_running);
+
+        if (typeof data.auto_motion_mode === "string" && AUTO_MOTION_LABELS[data.auto_motion_mode]) {
+          autoMotionMode = data.auto_motion_mode;
+        }
+        setStreamStatus(data.status || data.message || "自动避障已启动");
+      } catch (e) {
+        console.error("startObstacleAvoidance error:", e);
+        setObstacleAvoidanceState({ enabled: false, active: false });
+        setStreamStatus(`开启自动避障失败：${e.message || e}`);
+      } finally {
+        isObstacleAvoidanceBusy = false;
+        updateObstacleAvoidanceUI();
+        await loadStatus();
+      }
+    }
+
+    async function stopObstacleAvoidance() {
+      if (isObstacleAvoidanceBusy || !isObstacleAvoidanceEnabled) return;
+
+      isObstacleAvoidanceBusy = true;
+      updateObstacleAvoidanceUI();
+      cancelAutoMotionSelection();
+      stopMoveDirection(false);
+
+      try {
+        setStreamStatus("自动避障关闭中...");
+        const data = await postJson("/api/obstacle_avoidance", { enabled: false });
+        setObstacleAvoidanceState(data);
+        setStreamStatus(data.status || data.message || "自动避障已关闭");
+      } catch (e) {
+        console.error("stopObstacleAvoidance error:", e);
+        setStreamStatus(`关闭自动避障失败：${e.message || e}`);
+      } finally {
+        isObstacleAvoidanceBusy = false;
+        updateObstacleAvoidanceUI();
+        await loadStatus();
+      }
+    }
+
+    async function toggleObstacleAvoidance() {
+      if (isObstacleAvoidanceEnabled) {
+        await stopObstacleAvoidance();
+      } else {
+        await startObstacleAvoidance();
+      }
+    }
+
+    async function startCleaning() {
+      if (isCleaningBusy || isCleaning) return;
+
+      isCleaningBusy = true;
+      cleaningBtn.disabled = true;
+
+      try {
+        setStreamStatus("异物清理启动中...");
+        const data = await postOnly("/api/start_cleaning");
+        setCleaningState(true);
+        setStreamStatus(data.message || "异物清理已开启");
+      } catch (e) {
+        console.error("startCleaning error:", e);
+        setStreamStatus(`开启异物清理失败：${e.message || e}`);
+      } finally {
+        isCleaningBusy = false;
+        cleaningBtn.disabled = false;
+        await loadStatus();
+      }
+    }
+
+    async function stopCleaning() {
+      if (isCleaningBusy || !isCleaning) return;
+
+      isCleaningBusy = true;
+      cleaningBtn.disabled = true;
+
+      try {
+        setStreamStatus("异物清理结束中...");
+        const data = await postOnly("/api/stop_cleaning");
+        setCleaningState(false);
+        setStreamStatus(data.message || "异物清理已结束");
+      } catch (e) {
+        console.error("stopCleaning error:", e);
+        setStreamStatus(`结束异物清理失败：${e.message || e}`);
+      } finally {
+        isCleaningBusy = false;
+        cleaningBtn.disabled = false;
+        await loadStatus();
+      }
+    }
+
+    async function toggleCleaning() {
+      if (isCleaning) {
+        await stopCleaning();
+      } else {
+        await startCleaning();
+      }
+    }
+
+    async function toggleControlMode() {
+      if (isObstacleAvoidanceBusy) return;
+
+      cancelAutoMotionSelection();
+      stopMoveDirection();
+
+      const nextMode = controlMode === "manual" ? "auto" : "manual";
+
+      try {
+        if (isObstacleAvoidanceEnabled) {
+          await stopObstacleAvoidance();
+        }
+        await waitForMovementRequests();
+        const data = await postJson("/api/control_mode", { mode: nextMode });
+
+        controlMode = data.control_mode === "auto" ? "auto" : "manual";
+        if (typeof data.auto_motion_mode === "string" && AUTO_MOTION_LABELS[data.auto_motion_mode]) {
+          autoMotionMode = data.auto_motion_mode;
+        }
+        updateControlModeUI();
+        setStreamStatus(data.message || `已切换为${CONTROL_MODES[controlMode].label}`);
+      } catch (e) {
+        console.error("toggleControlMode error:", e);
+        setStreamStatus(`模式切换失败：${e.message || e}`);
+      }
+    }
+
+    function updateStreamStatusFromBasic(basic) {
+      if (!basic || typeof basic !== "object") return;
+
+      const extras = [];
+      if (isRecording || basic.recording_ok) extras.push("录制中");
+      if (isDetectionEnabled || basic.foreign_detection_enabled) extras.push("异物识别中");
+      if (isCleaning || basic.cleaning_on) extras.push("异物清理中");
+      if (isObstacleAvoidanceEnabled || basic.obstacle_avoidance_enabled) extras.push("自动避障运行中");
+      if (isRobotRunning || basic.robot_running) extras.push("运动已启动");
+
+      const profileName = {
+        "sensor-ultra": "CSI高分辨率档",
+        "sensor-balanced": "CSI高分辨率稳态档",
+        "ultra-quality": "极致清晰档",
+        "max-quality": "极清档",
+        "high-quality": "高清档",
+        "compatibility": "兼容高清档",
+        "safe-hd-plus": "增强720P档",
+        "safe-hd": "稳定720P档",
+        "safe-original": "原始保底档"
+      }[String(basic.stream_profile || "")] || "";
+
+      if (profileName) extras.push(profileName);
+
+      const clientStats = basic.client_video_stats;
+      if (clientStats && typeof clientStats === "object") {
+        const cw = Number(clientStats.width || 0);
+        const ch = Number(clientStats.height || 0);
+        const cfps = Number(clientStats.fps || 0);
+        const closs = Number(clientStats.packet_loss_pct || 0);
+
+        if (cw > 0 && ch > 0 && cfps > 0) {
+          extras.push(
+            `Pad ${cw}x${ch}/${cfps.toFixed(1)}FPS/loss ${closs.toFixed(2)}%`
+          );
+        }
+      }
+
+      const guardStatus = String(basic.quality_guard_status || "");
+      if (
+        basic.quality_guard_enabled &&
+        guardStatus &&
+        guardStatus !== "正常"
+      ) {
+        extras.push(`负载保护：${guardStatus}`);
+      }
+
+      const extraText = extras.length ? ` | ${extras.join(" | ")}` : "";
+
+      if (basic.stream_ok) {
+        const resText = basic.resolution || "";
+        const fpsText = String(basic.fps ?? "");
+        const bitrate = Number(basic.bitrate_mbps);
+        const bitrateText = Number.isFinite(bitrate) ? ` | ${bitrate.toFixed(1)} Mbps` : "";
+        const presetText = basic.encoder_preset ? ` | ${basic.encoder_preset}` : "";
+        const sharpness = Number(basic.camera_sharpness);
+        const sharpnessText = Number.isFinite(sharpness) ? ` | 锐度 ${sharpness.toFixed(2)}` : "";
+        const verifiedText = basic.stream_verified ? " | 已验帧" : "";
+
+        if (resText && fpsText) {
+          setStreamStatus(
+            `视频已接入${extraText} | ${resText} @ ${fpsText} FPS${bitrateText}${presetText}${sharpnessText}${verifiedText}`
+          );
+        } else {
+          setStreamStatus(`视频已接入${extraText}${bitrateText}${presetText}`);
+        }
+      } else if (basic.stream_error) {
+        setStreamStatus(`推流异常：${basic.stream_error}`);
+      } else {
+        setStreamStatus(`视频状态未知${extraText}`);
+      }
+    }
+
+    async function loadStatus() {
+      try {
+        const res = await fetch("/api/status", { cache: "no-store" });
+        const basic = await res.json();
+        handleVideoRecovery(basic);
+
+        if (basic.gimbal_pose && typeof basic.gimbal_pose === "object") {
+          updateGimbalPose(basic.gimbal_pose);
+        } else if (typeof basic.angle !== "undefined") {
+          // 兼容旧版 appV2.py：原单轴角度先显示在俯仰角位置。
+          updateGimbalPose({ pitch: basic.angle });
+        }
+
+        if (!gimbalBusy && typeof basic.gimbal_connected !== "undefined") {
+          applyGimbalConnectionState({
+            connected: basic.gimbal_connected,
+            tcp_reachable: (
+              typeof basic.gimbal_tcp_reachable !== "undefined"
+                ? basic.gimbal_tcp_reachable
+                : basic.gimbal_connected
+            ),
+            protocol_ok: basic.gimbal_protocol_ok,
+            control_ready: basic.gimbal_control_ready,
+            busy: basic.gimbal_busy,
+            mode_name: basic.gimbal_mode_name,
+            last_error: basic.gimbal_error,
+            control_error: basic.gimbal_control_error
+          });
+        }
+
+        if (typeof basic.recording_ok !== "undefined" && !isRecordingBusy) {
+          setRecordingState(!!basic.recording_ok);
+        }
+
+        if (typeof basic.foreign_detection_enabled !== "undefined" && !isDetectionBusy) {
+          setDetectionState(!!basic.foreign_detection_enabled);
+        }
+
+        if (typeof basic.cleaning_on !== "undefined" && !isCleaningBusy) {
+          setCleaningState(!!basic.cleaning_on);
+        }
+
+        if (typeof basic.robot_running !== "undefined" && !isRobotBusy) {
+          setRobotRunningState(!!basic.robot_running);
+        }
+
+        if (typeof basic.speed !== "undefined") {
+          setSpeedDisplay(Number(basic.speed) || 0);
+        }
+
+        if (typeof basic.fan_speed !== "undefined") {
+          currentFanSpeed = Math.max(FAN_MIN, Math.min(FAN_MAX, Number(basic.fan_speed) || 0));
+          fanSpeedValue.textContent = currentFanSpeed;
+        }
+
+        if (typeof basic.control_mode !== "undefined") {
+          controlMode = basic.control_mode === "auto" ? "auto" : "manual";
+          updateControlModeUI();
+        }
+
+        if (typeof basic.auto_motion_mode === "string" && AUTO_MOTION_LABELS[basic.auto_motion_mode]) {
+          autoMotionMode = basic.auto_motion_mode;
+        }
+
+        if (typeof basic.obstacle_avoidance_enabled !== "undefined" && !isObstacleAvoidanceBusy) {
+          setObstacleAvoidanceState({
+            enabled: !!basic.obstacle_avoidance_enabled,
+            active: !!basic.obstacle_avoidance_active,
+            action: basic.obstacle_avoidance_action || "idle",
+            direction: basic.obstacle_avoidance_direction || "none",
+            left_overlap: !!basic.obstacle_avoidance_left_overlap,
+            right_overlap: !!basic.obstacle_avoidance_right_overlap,
+            status: basic.obstacle_avoidance_status || "",
+            last_error: basic.obstacle_avoidance_error || ""
+          }, false);
+        }
+
+        updateStreamStatusFromBasic(basic);
+      } catch (e) {
+        console.error("loadStatus error:", e);
+      }
+    }
+
+    function startStatusPolling() {
+      stopStatusPolling();
+      statusTimer = setInterval(loadStatus, 2000);
+    }
+
+    function stopStatusPolling() {
+      if (statusTimer) {
+        clearInterval(statusTimer);
+        statusTimer = null;
+      }
+    }
+
+    async function safeShutdown() {
+      const ok = confirm("确认执行安全关机吗？\n\n关机后需要重新给树莓派上电才能继续使用。");
+      if (!ok) return;
+
+      const shutdownBtn = document.querySelector(".shutdown-btn");
+
+      try {
+        if (shutdownBtn) {
+          shutdownBtn.disabled = true;
+          shutdownBtn.textContent = "正在提交关机请求...";
+        }
+
+        const response = await fetch("/api/shutdown", {
+          method: "POST",
+          headers: {
+            "Accept": "application/json"
+          },
+          cache: "no-store"
+        });
+
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (_) {
+          data = {};
+        }
+
+        if (!response.ok || data.ok === false) {
+          throw new Error(
+            data.message || `服务器返回错误：HTTP ${response.status}`
+          );
+        }
+
+        stopStatusPolling();
+        alert(data.message || "系统正在安全关机...");
+
+        if (shutdownBtn) {
+          shutdownBtn.textContent = "系统正在关机...";
+        }
+      } catch (e) {
+        console.error("safeShutdown error:", e);
+        alert(`关机请求失败：${e.message}`);
+
+        if (shutdownBtn) {
+          shutdownBtn.disabled = false;
+          shutdownBtn.textContent = "安全关机";
+        }
+      }
+    }
+
+    speedInput.addEventListener("change", () => {
+      let val = Number(speedInput.value);
+      if (Number.isNaN(val)) val = currentSpeed;
+      val = Math.max(0, Math.min(0.5, val));
+      setSpeed(val);
+    });
+
+    speedInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        speedInput.blur();
+      }
+    });
+
+    videoFrame.addEventListener("loadedmetadata", () => {
+      const w = Number(videoFrame.videoWidth || 0);
+      const h = Number(videoFrame.videoHeight || 0);
+
+      if (w > 0 && h > 0) {
+        setStreamStatus(`视频首帧已到达 | Pad 实际 ${w}x${h}`);
+      } else {
+        setStreamStatus("视频首帧已到达");
+      }
+
+      setTimeout(loadStatus, 300);
+    });
+
+    videoFrame.addEventListener("playing", () => {
+      streamFailureCount = 0;
+    });
+
+    videoFrame.addEventListener("stalled", () => {
+      setStreamStatus("视频数据短暂中断，正在等待 WebRTC 恢复...");
+    });
+
+    videoFrame.addEventListener("error", () => {
+      const message = videoFrame.error
+        ? `视频解码错误 ${videoFrame.error.code}`
+        : "视频元素错误";
+
+      setStreamStatus(`${message}，正在重新连接...`);
+      scheduleWhepReconnect(message);
+    });
+
+    videoFallbackFrame.addEventListener("load", () => {
+      if (iframeFallbackActive) {
+        setStreamStatus("兼容播放器已加载，正在等待 MediaMTX 画面...");
+      }
+    });
+
+    document.addEventListener("fullscreenchange", () => {
+      const btn = document.getElementById("fullscreenBtn");
+      btn.title = document.fullscreenElement ? "退出全屏" : "全屏查看";
+      setTimeout(() => drawDetectionOverlay(latestDetectionData), 80);
+    });
+
+    window.addEventListener("resize", () => {
+      drawDetectionOverlay(latestDetectionData);
+    });
+
+    if (window.ResizeObserver) {
+      const detectionResizeObserver = new ResizeObserver(() => {
+        drawDetectionOverlay(latestDetectionData);
+      });
+      detectionResizeObserver.observe(videoFrameWrap);
+    }
+
+    window.addEventListener("mouseup", () => {
+      handleDirectionRelease();
+    });
+
+    window.addEventListener("touchend", () => {
+      handleDirectionRelease();
+    });
+
+    window.addEventListener("touchcancel", () => {
+      handleDirectionRelease();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        sendGimbalStopOnPageExit();
+      }
+    });
+
+    window.addEventListener("pagehide", () => {
+      sendGimbalStopOnPageExit();
+      stopDetectionOverlayPolling();
+      closeWhepReader(true).catch(() => {});
+      if (videoFallbackFrame) videoFallbackFrame.src = "about:blank";
+    });
+
+    window.addEventListener("beforeunload", () => {
+      sendGimbalStopOnPageExit();
+      stopDetectionOverlayPolling();
+      closeWhepReader(true).catch(() => {});
+      if (videoFallbackFrame) videoFallbackFrame.src = "about:blank";
+    });
+
+    updateDateTime();
+    setInterval(updateDateTime, 1000);
+    setInterval(collectAndReportWebRTCStats, PAD_STATS_INTERVAL_MS);
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      updateControlModeUI();
+      await connectVideoStream(true);
+      await Promise.allSettled([
+        loadStatus(),
+        initializeGimbalControl()
+      ]);
+      startDetectionOverlayPolling();
+      startStatusPolling();
+
+      const bindMoveButton = (btn, direction) => {
+        if (!btn) return;
+
+        btn.addEventListener("mousedown", (e) => {
+          if (controlMode !== "manual") return;
+          e.preventDefault();
+          handleDirectionPress(direction, btn);
+        });
+
+        btn.addEventListener("touchstart", (e) => {
+          if (controlMode !== "manual") return;
+          e.preventDefault();
+          handleDirectionPress(direction, btn);
+        });
+
+        btn.addEventListener("click", (e) => {
+          if (controlMode !== "auto") return;
+          e.preventDefault();
+          handleDirectionPress(direction, btn);
+        });
+      };
+
+
+      bindMoveButton(moveForwardBtn, "forward");
+      bindMoveButton(moveLeftBtn, "left");
+      bindMoveButton(moveRightBtn, "right");
+      bindMoveButton(moveBackwardBtn, "backward");
+
+      if (moveStopBtn) {
+        moveStopBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          handleStopDirection(moveStopBtn);
+        });
+
+        moveStopBtn.addEventListener("touchstart", (e) => {
+          if (controlMode === "auto") {
+            e.preventDefault();
+            handleStopDirection(moveStopBtn);
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>
