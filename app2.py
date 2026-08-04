@@ -5183,7 +5183,7 @@ def get_video_config():
 # =========================
 @app.route("/")
 def index():
-    return send_file(BASE_DIR / "index_汇总.html")
+    return render_template("index1.html")
 
 
 @app.route("/detection_view")
