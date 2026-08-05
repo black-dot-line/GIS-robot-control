@@ -2442,7 +2442,7 @@
     <div class="layout">
       <div class="left-col">
         <section class="panel video-panel">
-          <div class="panel-header">画面预览</div>
+          <div class="panel-header">4K USB 摄像头实时画面</div>
 
           <div class="video-box">
             <div class="video-frame" id="videoFrameWrap">
@@ -2453,7 +2453,7 @@
                 muted
                 playsinline
                 disablepictureinpicture
-                preload="none"
+                preload="auto"
               ></video>
 
               <iframe
@@ -2467,7 +2467,7 @@
 
               <canvas id="detectionCanvas" class="detection-overlay"></canvas>
 
-              <div class="stream-status" id="streamStatus">视频连接中...</div>
+              <div class="stream-status" id="streamStatus">4K USB 视频连接中...</div>
               <div class="datetime" id="datetime">--/--/-- --:--:--</div>
 
               <button
@@ -5361,6 +5361,8 @@
       if (isRobotRunning || basic.robot_running) extras.push("运动已启动");
 
       const profileName = {
+        "usb4k-balanced": "4K采集/1080P流畅档",
+        "usb4k-720p": "4K采集/720P低负载档",
         "sensor-ultra": "CSI高分辨率档",
         "sensor-balanced": "CSI高分辨率稳态档",
         "ultra-quality": "极致清晰档",
