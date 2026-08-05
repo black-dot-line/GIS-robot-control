@@ -1,4 +1,4 @@
-# GIS 管内壁爬行机器人控制端（Combined Version）
+# GIS 管内壁爬行机器人控制端（v1.0.1）
 
 本目录是运行在树莓派上的机器人上位控制程序。系统通过浏览器提供低延迟视频、底盘运动、自动避障、异物识别与清理、G1 云台、拍照录像和安全关机等功能。
 
@@ -35,7 +35,7 @@ flowchart LR
 ## 目录结构
 
 ```text
-combined version/
+v1.0.1/
 ├── app2.py                 # Flask 后端、视频、识别、ROS2、GPIO 和云台控制
 ├── templates/
 │   └── index1.html         # 浏览器控制界面（CSS/JavaScript 均内嵌）
@@ -83,6 +83,19 @@ def index():
 - “异物清理”控制树莓派 GPIO13 上的本地电调风机。
 - “机器人风扇速度”向 ROS2 `/fan_speed` 发布 `0~180` 的整数。
 
+### 3. G1 云台默认模式
+
+v1.0.1 增加了 G1 默认模式维护机制。默认配置为 `G1_DEFAULT_MODE=3`（全跟随模式），并由后台 watchdog 在启动后低频查询；发现云台模式被改变时，会在没有进行中的云台动作时恢复默认模式，默认检查周期为 15 秒。
+
+- 需要默认锁定模式时设置 `G1_DEFAULT_MODE=0`。
+- 需要完全由人工管理模式时设置 `G1_DEFAULT_MODE_ENABLED=0`。
+- 手动调用 `/api/gimbal/mode` 改成其他模式后，如果 watchdog 仍启用，模式可能在下一次检查时恢复为默认模式。
+- `G1_AUTO_LOCK_MODE` 仅为旧配置名保留，v1.0.1 不再读取其环境变量；请改用上面的两个配置项。
+
+模式维护不会执行周期性回中，只在模式查询或恢复时访问 G1；进行中的方向/俯仰/横滚动作会优先完成。程序退出、网页安全关机和清理流程都会停止该 watchdog。
+
+v1.0.1 同时加强了 G1 TCP 协议处理：请求会校验响应命令号并有限度忽略无关响应帧，设置模式后会再次查询确认；多进程部署时使用文件锁串行化 G1 TCP 通信。动作间隔默认缩短为 40 ms，Neutral 和动作完成后的默认等待均为 20 ms，如实机响应不稳定可通过环境变量调大这些值。
+
 ## 软件依赖
 
 ### 操作系统组件
@@ -106,7 +119,7 @@ GPIO 后端按系统选择安装。Raspberry Pi OS Bookworm 通常使用 `python
 ROS2 的 `rclpy` 通常由系统包提供，因此虚拟环境应保留系统包：
 
 ```bash
-cd "/path/to/combined version"
+cd "/path/to/v1.0.1"
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -140,8 +153,8 @@ python -c "import rclpy; from geometry_msgs.msg import Twist; from std_msgs.msg 
 
 1. 环境变量 `MEDIAMTX_BIN`。
 2. 系统 `PATH` 中的 `mediamtx`。
-3. `combined version/bin/mediamtx`。
-4. `combined version/mediamtx`。
+3. `v1.0.1/bin/mediamtx`。
+4. `v1.0.1/mediamtx`。
 5. `/usr/local/bin/mediamtx` 或 `/usr/bin/mediamtx`。
 
 推荐将已验证版本的 ARM64 可执行文件放在 `bin/mediamtx`，并赋予执行权限：
@@ -246,7 +259,16 @@ ros2 run basecontroller basecontroller
 | `G1_CONNECT_TIMEOUT` | `2.0` | TCP 连接超时，秒 |
 | `G1_RESPONSE_TIMEOUT` | `2.0` | 命令响应超时，秒 |
 | `G1_PULSE_DURATION_MS` | `250` | 云台单击动作持续时间，限制为 80~800 ms |
-| `G1_AUTO_LOCK_MODE` | `0` | 设为 `1` 时控制前强制锁定模式 |
+| `G1_DEFAULT_MODE` | `3` | G1 默认模式：`0` 锁定、`1` 航向跟随+俯仰锁定、`2` 航向跟随+俯仰跟随、`3` 全跟随 |
+| `G1_DEFAULT_MODE_ENABLED` | `1` | 是否启用后台默认模式 watchdog；设为 `0` 后由人工管理 G1 模式 |
+| `G1_MODE_START_DELAY_SECONDS` | `0.20` | watchdog 启动后的首次检查延迟，秒 |
+| `G1_MODE_VERIFY_INTERVAL_SECONDS` | `15.0` | watchdog 在线检查周期，秒，范围 5~300 |
+| `G1_MODE_APPLY_DELAY_SECONDS` | `0.08` | 设置模式后再次查询前的等待时间，秒 |
+| `G1_MAX_UNRELATED_RESPONSE_FRAMES` | `6` | 单次 TCP 请求最多忽略的无关响应帧数量 |
+| `G1_COMMAND_MIN_INTERVAL` | `0.04` | G1 TCP 命令之间的最小间隔，秒 |
+| `G1_NEUTRAL_SETTLE_SECONDS` | `0.02` | 云台动作前 Neutral 的等待时间，秒 |
+| `G1_POST_ACTION_SETTLE_SECONDS` | `0.02` | 云台动作完成后的等待时间，秒 |
+| `G1_AUTO_LOCK_MODE` | 不再读取 | v1.0.0 兼容配置名；v1.0.1 请使用 `G1_DEFAULT_MODE` 和 `G1_DEFAULT_MODE_ENABLED` |
 | `G1_YAW_DIRECTION` | `1` | 航向方向反向时设为 `-1` |
 | `G1_PITCH_DIRECTION` | `-1` | 俯仰方向反向时改为 `1` |
 | `DETECTION_BACKEND` | `yolov8` | 自动避障要求保持为 `yolov8` |
@@ -267,7 +289,7 @@ OpenCV 小异物识别还支持 `FOREIGN_DETECTION_MIN_AREA`、`FOREIGN_DETECTIO
 ## 启动
 
 ```bash
-cd "/path/to/combined version"
+cd "/path/to/v1.0.1"
 source /opt/ros/<ros-distro>/setup.bash
 source /path/to/robot_ws/install/setup.bash
 source .venv/bin/activate
@@ -285,7 +307,7 @@ python app2.py
 http://<树莓派IP>:5000
 ```
 
-程序启动时会依次尝试初始化 GPIO 清理风机、网络地址监测、MediaMTX/摄像头推流、YOLO 识别线程和 ROS2 节点。部分组件失败时 Flask 仍可能继续运行，应查看启动输出和 `/api/logs`，不能仅以网页能打开作为整机就绪依据。
+程序启动时会依次尝试初始化 GPIO 清理风机、网络地址监测、G1 默认模式 watchdog、MediaMTX/摄像头推流、YOLO 识别线程和 ROS2 节点。部分组件失败时 Flask 仍可能继续运行，应查看启动输出和 `/api/logs`，不能仅以网页能打开作为整机就绪依据。
 
 默认视频参数为 `1280x720 @ 15 FPS`。界面/API 支持：
 
@@ -325,8 +347,12 @@ http://<树莓派IP>:5000
 | `POST` | `/api/capture_photo` | 拍照 |
 | `POST` | `/api/start_recording`、`/api/stop_recording` | 开始/结束录像 |
 | `GET` | `/api/gimbal/status` | 检查 G1 TCP 和控制状态 |
+| `GET/POST` | `/api/gimbal/mode` | 查询或设置 G1 模式；未指定模式时使用 `G1_DEFAULT_MODE` |
+| `POST` | `/api/gimbal/default_mode` | 立即恢复配置的默认模式 |
+| `POST` | `/api/gimbal/lock` | 兼容接口：设置 G1 锁定模式 `mode=0` |
+| `GET` | `/api/gimbal/lock/status` | 查询 G1 锁定模式确认状态 |
 | `POST` | `/api/gimbal/jog/pulse` | 执行一次 Neutral → Move → Stop 云台动作 |
-| `POST` | `/api/gimbal/reset` | 云台回中 |
+| `POST` | `/api/gimbal/reset` | 云台快速回中，并恢复 `G1_DEFAULT_MODE` |
 | `POST` | `/api/shutdown` | 停止组件并执行系统关机 |
 
 所有控制 API 当前均无身份认证或 CSRF 防护，只能部署在隔离、可信的局域网中，禁止直接暴露到互联网。
@@ -392,6 +418,8 @@ curl -s http://127.0.0.1:5000/api/logs
 - 实机方向相反时调整 `G1_YAW_DIRECTION` 或 `G1_PITCH_DIRECTION` 为相反符号。
 - `G1_RTSP_PORT` 和 `G1_RTSP_PATH` 在当前组合版中仅生成 `G1_RTSP_URL`，主视频链路仍使用树莓派摄像头，并未读取 G1 RTSP。
 
+如果网页中手动切换 G1 模式后又自动变回原模式，先检查 `G1_DEFAULT_MODE_ENABLED` 是否为 `1`。这是预期的 watchdog 行为；可将 `G1_DEFAULT_MODE` 改为需要保持的模式，或设置 `G1_DEFAULT_MODE_ENABLED=0` 后重启程序。`/api/gimbal/status` 会返回默认模式、是否已确认、最近一次恢复错误和 watchdog 状态。
+
 ### GPIO 清理风机不可用
 
 - 确认使用 BCM GPIO13/物理 33 脚，而不是物理 13 脚。
@@ -420,7 +448,7 @@ curl -s http://127.0.0.1:5000/api/logs
 - [ ] ROS2 环境已 source，`basecontroller` 可被发现。
 - [ ] 机器人悬空时前进、后退、左右转、停止均符合预期。
 - [ ] `/robot_mode` 的 `0/1/3/5` 与底层控制逻辑一致。
-- [ ] G1 云台方向、回中和自动停止符合预期。
+- [ ] G1 云台方向、回中、自动停止和默认模式 watchdog 符合预期；确认 `G1_DEFAULT_MODE` 设置正确。
 - [ ] GPIO13 电调在启动、关闭、退出和关机时均回到 1000 us。
 - [ ] OpenCV 异物识别与 YOLO 孔洞识别已分别验证。
 - [ ] 自动避障在识别失效、切回手控和点击停止时可靠停车。
