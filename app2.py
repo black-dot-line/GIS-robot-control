@@ -12,13 +12,7 @@ import subprocess
 import threading
 import time
 import uuid
-from contextlib import contextmanager
 from pathlib import Path
-
-try:
-    import fcntl
-except Exception:
-    fcntl = None
 from urllib import error as uerr
 from urllib import request as ureq
 from urllib.parse import urljoin
@@ -196,28 +190,28 @@ except Exception:
 try:
     G1_COMMAND_MIN_INTERVAL = max(
         0.04,
-        min(0.50, float(os.environ.get("G1_COMMAND_MIN_INTERVAL", "0.04")))
+        min(0.50, float(os.environ.get("G1_COMMAND_MIN_INTERVAL", "0.10")))
     )
 except Exception:
-    G1_COMMAND_MIN_INTERVAL = 0.04
+    G1_COMMAND_MIN_INTERVAL = 0.10
 
 # 每个新动作前先发送零速中和帧，再等待一小段时间。
 try:
     G1_NEUTRAL_SETTLE_SECONDS = max(
         0.04,
-        min(0.50, float(os.environ.get("G1_NEUTRAL_SETTLE_SECONDS", "0.02")))
+        min(0.50, float(os.environ.get("G1_NEUTRAL_SETTLE_SECONDS", "0.10")))
     )
 except Exception:
-    G1_NEUTRAL_SETTLE_SECONDS = 0.02
+    G1_NEUTRAL_SETTLE_SECONDS = 0.10
 
 # 动作完成后的设备恢复窗口，避免下一次点击立刻压上来。
 try:
     G1_POST_ACTION_SETTLE_SECONDS = max(
         0.05,
-        min(0.60, float(os.environ.get("G1_POST_ACTION_SETTLE_SECONDS", "0.02")))
+        min(0.60, float(os.environ.get("G1_POST_ACTION_SETTLE_SECONDS", "0.14")))
     )
 except Exception:
-    G1_POST_ACTION_SETTLE_SECONDS = 0.02
+    G1_POST_ACTION_SETTLE_SECONDS = 0.14
 
 try:
     G1_PULSE_DURATION_MS = max(
@@ -235,90 +229,11 @@ try:
 except Exception:
     G1_ROLL_SETTLE_SECONDS = 0.30
 
-# =========================
-# G1 默认工作模式 / 快速模式保持
-# =========================
-# 模式定义：
-#   0 = 锁定模式
-#   1 = 航向跟随、俯仰锁定
-#   2 = 航向俯仰跟随
-#   3 = 全跟随
-#
-# 用户本次明确要求“全跟随模式”，因此默认值为 3。
-# 如需改为默认锁定，只需设置：
-#   export G1_DEFAULT_MODE=0
-try:
-    G1_DEFAULT_MODE = int(os.environ.get("G1_DEFAULT_MODE", "3"))
-except Exception:
-    G1_DEFAULT_MODE = 3
-if G1_DEFAULT_MODE not in (0, 1, 2, 3):
-    G1_DEFAULT_MODE = 3
-
-G1_DEFAULT_MODE_ENABLED = os.environ.get(
-    "G1_DEFAULT_MODE_ENABLED", "1"
-).strip().lower() not in {"0", "false", "no", "off"}
-
-# 兼容旧代码：默认全跟随时不再禁止其它模式。
-G1_LOCK_MODE_REQUIRED = False
-G1_AUTO_LOCK_MODE = False
-
-# 启动后快速尝试一次；在线时低频确认，避免每 2 秒反复打扰控制。
-try:
-    G1_LOCK_START_DELAY_SECONDS = max(
-        0.0,
-        min(5.0, float(os.environ.get("G1_MODE_START_DELAY_SECONDS", "0.20")))
-    )
-except Exception:
-    G1_LOCK_START_DELAY_SECONDS = 0.20
-
-try:
-    G1_LOCK_VERIFY_INTERVAL_SECONDS = max(
-        5.0,
-        min(300.0, float(os.environ.get("G1_MODE_VERIFY_INTERVAL_SECONDS", "15.0")))
-    )
-except Exception:
-    G1_LOCK_VERIFY_INTERVAL_SECONDS = 15.0
-
-try:
-    G1_LOCK_APPLY_DELAY_SECONDS = max(
-        0.03,
-        min(0.50, float(os.environ.get("G1_MODE_APPLY_DELAY_SECONDS", "0.08")))
-    )
-except Exception:
-    G1_LOCK_APPLY_DELAY_SECONDS = 0.08
-
-G1_LOCK_CONFIRM_READS = 1
-G1_LOCK_SET_ATTEMPTS = 2
-
-# 回中按钮只做短暂协议间隔，不再进行 4~5 秒姿态轮询。
-try:
-    G1_HOME_MIN_SETTLE_SECONDS = max(
-        0.05,
-        min(0.80, float(os.environ.get("G1_HOME_MODE_DELAY_SECONDS", "0.18")))
-    )
-except Exception:
-    G1_HOME_MIN_SETTLE_SECONDS = 0.18
-G1_HOME_SETTLE_TIMEOUT_SECONDS = G1_HOME_MIN_SETTLE_SECONDS
-G1_HOME_POSE_POLL_INTERVAL_SECONDS = 0.10
-G1_HOME_YAW_TOLERANCE_DEG = 3.0
-G1_HOME_ROLL_TOLERANCE_DEG = 2.0
-G1_HOME_PITCH_TOLERANCE_DEG = 3.0
-G1_HOME_STABLE_READS = 1
-
-G1_LOCK_RETRY_MIN_SECONDS = 1.0
-G1_LOCK_RETRY_MAX_SECONDS = 10.0
-G1_LOCK_VERBOSE = os.environ.get(
-    "G1_MODE_VERBOSE", "1"
-).strip().lower() not in {"0", "false", "no", "off"}
-
-# 允许过滤主动推送或不属于本次请求的协议帧。
-try:
-    G1_MAX_UNRELATED_RESPONSE_FRAMES = max(
-        0,
-        min(12, int(os.environ.get("G1_MAX_UNRELATED_RESPONSE_FRAMES", "6")))
-    )
-except Exception:
-    G1_MAX_UNRELATED_RESPONSE_FRAMES = 6
+# 默认保持摄像头当前云台模式，避免首次点击因切换模式产生大幅跳动。
+# 确实需要手动控制时强制锁定，可设置 G1_AUTO_LOCK_MODE=1。
+G1_AUTO_LOCK_MODE = os.environ.get("G1_AUTO_LOCK_MODE", "0").strip().lower() not in {
+    "0", "false", "no", "off"
+}
 
 # 航向/俯仰按住控制的安全超时。前端每秒续期；页面失联时会自动停止。
 try:
@@ -660,12 +575,6 @@ gimbal_watchdog_lock = threading.Lock()
 gimbal_pulse_lock = threading.Lock()
 gimbal_roll_lock = threading.RLock()
 
-# 锁定模式后台线程。
-gimbal_lock_worker_thread_lock = threading.Lock()
-gimbal_lock_worker_thread = None
-gimbal_lock_worker_stop_event = threading.Event()
-gimbal_lock_worker_process_fp = None
-
 gimbal_stop_event = threading.Event()
 gimbal_watchdog_timer = None
 gimbal_watchdog_generation = 0
@@ -691,43 +600,6 @@ gimbal_state = {
 
     "mode": None,
     "mode_name": "未知",
-    "default_mode": int(G1_DEFAULT_MODE),
-    "default_mode_name": "待初始化",
-    "default_mode_verified": False,
-    "mode_apply_active": False,
-    "mode_error": "",
-
-    # LK_MODE 严格锁定状态。
-    "lock_required": bool(G1_LOCK_MODE_REQUIRED),
-    "lock_active": False,
-    "lock_verified": False,
-    "lock_error": "",
-    "lock_attempts": 0,
-    "lock_set_count": 0,
-    "lock_mode_before": None,
-    "lock_mode_after": None,
-    "lock_confirm_reads": [],
-    "lock_last_reason": "",
-    "lock_last_tx": "",
-    "lock_last_ack": "",
-    "lock_last_query_response": "",
-    "lock_last_attempt_at": 0.0,
-    "lock_last_set_at": 0.0,
-    "lock_last_success_at": 0.0,
-    "lock_next_retry_seconds": 0.0,
-    "lock_worker_pid": None,
-
-    # “回中 -> 锁定”事务诊断。
-    "home_lock_stage": "idle",
-    "home_lock_sequence_count": 0,
-    "home_last_tx": "",
-    "home_last_ack": "",
-    "home_centered": False,
-    "home_stable_reads": 0,
-    "home_pose_samples": [],
-    "home_pose_error": "",
-    "home_last_completed_at": 0.0,
-
     "moving": False,
     "axis": "",
     "direction": 0,
@@ -1223,16 +1095,6 @@ G1_MODE_NAME = {
 }
 
 
-# G1 V1.0.3 文档中的完整固定帧。
-G1_FRAME_QUERY_GIMBAL_MODE = bytes.fromhex("AA 06 00 05 01 C4")
-G1_FRAME_HOME = bytes.fromhex("AA 05 05 02 A7")
-G1_FRAME_SET_LOCK_MODE = bytes.fromhex("AA 06 05 01 00 CD")
-G1_FRAME_NEUTRAL_JOYSTICK = bytes.fromhex("AA 09 05 06 00 00 00 00 0A")
-
-G1_IO_PROCESS_LOCK_PATH = RUNTIME_DIR / "g1_tcp_io.lock"
-G1_WORKER_PROCESS_LOCK_PATH = RUNTIME_DIR / "g1_lock_worker.lock"
-
-
 def g1_format_hex(data):
     if data is None:
         return ""
@@ -1250,30 +1112,6 @@ def g1_crc8(data):
             else:
                 crc = (crc << 1) & 0xFF
     return crc
-
-
-def validate_g1_protocol_constants():
-    expected = {
-        "query_mode": (G1_FRAME_QUERY_GIMBAL_MODE, 0xC4),
-        "home": (G1_FRAME_HOME, 0xA7),
-        "set_lock": (G1_FRAME_SET_LOCK_MODE, 0xCD),
-        "neutral_joystick": (G1_FRAME_NEUTRAL_JOYSTICK, 0x0A),
-    }
-
-    for name, (frame, expected_crc) in expected.items():
-        if len(frame) != frame[1]:
-            raise RuntimeError(
-                "G1 固定帧 {} 长度错误：字段={}，实际={}".format(
-                    name, frame[1], len(frame)
-                )
-            )
-        actual_crc = g1_crc8(frame[:-1])
-        if actual_crc != expected_crc or frame[-1] != expected_crc:
-            raise RuntimeError(
-                "G1 固定帧 {} CRC 错误：计算={:02X}，帧内={:02X}，期望={:02X}".format(
-                    name, actual_crc, frame[-1], expected_crc
-                )
-            )
 
 
 def g1_build_frame(command, params=b""):
@@ -1306,7 +1144,7 @@ def g1_recv_frame(sock):
         raise ValueError("G1 返回帧头错误：{}".format(g1_format_hex(header)))
 
     total_length = int(header[1])
-    if total_length < 5:
+    if total_length < 6:
         raise ValueError("G1 返回帧长度异常：{}".format(total_length))
 
     frame = header + g1_recv_exact(sock, total_length - 2)
@@ -1322,16 +1160,15 @@ def g1_recv_frame(sock):
 
 
 def g1_parse_response(frame):
-    # 标准错误帧可能只有 5 字节：55 05 FF error crc。
-    if len(frame) < 5:
+    if len(frame) < 6:
         raise ValueError("G1 返回帧过短：{}".format(g1_format_hex(frame)))
 
     result = {
         "raw": frame,
         "command": int(frame[2]),
         "error_code": int(frame[3]),
-        "data_type": int(frame[4]) if len(frame) >= 6 else None,
-        "params": bytes(frame[5:-1]) if len(frame) >= 6 else b"",
+        "data_type": int(frame[4]),
+        "params": bytes(frame[5:-1]),
         "checksum": int(frame[-1]),
     }
 
@@ -1366,8 +1203,6 @@ def _g1_mark_transport_error(exc):
         gimbal_state["last_tcp_error"] = text
         gimbal_state["last_control_error"] = text
         gimbal_state["last_error"] = text
-        gimbal_state["lock_verified"] = False
-        gimbal_state["lock_error"] = text
 
 
 def _g1_mark_protocol_success(affect_control_state=True):
@@ -1477,28 +1312,6 @@ def _g1_note_io_completed():
     gimbal_last_io_completed_monotonic = time.monotonic()
 
 
-@contextmanager
-def g1_process_io_guard():
-    """跨进程串行化 TCP 8888，兼容 gunicorn 多 worker。"""
-    if fcntl is None:
-        yield
-        return
-
-    fp = open(G1_IO_PROCESS_LOCK_PATH, "a+", encoding="utf-8")
-    try:
-        fcntl.flock(fp.fileno(), fcntl.LOCK_EX)
-        yield
-    finally:
-        try:
-            fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
-        try:
-            fp.close()
-        except Exception:
-            pass
-
-
 def _g1_set_motion_state(moving=False, axis="", direction=0, speed=0):
     with gimbal_state_lock:
         gimbal_state["moving"] = bool(moving)
@@ -1518,24 +1331,27 @@ def _g1_record_recovery(reason):
 
 
 def g1_probe_tcp():
-    """无动作 TCP 探测，线程与进程两级串行。"""
+    """
+    无动作 TCP 探测。
+
+    Probe 也通过 action/io 锁和最小间隔，避免状态检测在控制过程中
+    额外打开一个 8888 TCP 连接。
+    """
     with gimbal_action_lock:
         with gimbal_io_lock:
-            with g1_process_io_guard():
-                _g1_wait_command_gap()
-                try:
-                    with socket.create_connection(
-                        (G1_CAMERA_IP, G1_CONTROL_PORT),
-                        timeout=G1_CONNECT_TIMEOUT,
-                    ):
-                        _g1_mark_transport_reachable()
-                    return True
-                except (socket.timeout, TimeoutError, ConnectionError, OSError) as exc:
-                    _g1_mark_transport_error(exc)
-                    return False
-                finally:
-                    _g1_note_io_completed()
-
+            _g1_wait_command_gap()
+            try:
+                with socket.create_connection(
+                    (G1_CAMERA_IP, G1_CONTROL_PORT),
+                    timeout=G1_CONNECT_TIMEOUT,
+                ):
+                    _g1_mark_transport_reachable()
+                return True
+            except (socket.timeout, TimeoutError, ConnectionError, OSError) as exc:
+                _g1_mark_transport_error(exc)
+                return False
+            finally:
+                _g1_note_io_completed()
 
 
 def g1_send_frame(
@@ -1544,9 +1360,16 @@ def g1_send_frame(
     *,
     affect_control_state=True,
     operation="control",
-    expected_command=None,
 ):
-    """发送一帧 G1 命令并等待属于本次请求的响应。"""
+    """发送一帧 G1 命令并返回解析后的响应。
+
+    稳定性策略：
+    1. 所有 TCP/协议事务严格串行；
+    2. 相邻事务之间有最小间隔；
+    3. control 默认零重试，防止“设备已执行但 ACK 丢失”后重复动作；
+    4. pose/mode 查询可有限重试；
+    5. TCP 已 connect 后的协议/响应错误不会被误报成“网络断开”。
+    """
     if retries is None:
         if operation in ("pose", "mode", "query"):
             retry_count = int(G1_QUERY_RETRIES)
@@ -1555,103 +1378,67 @@ def g1_send_frame(
     else:
         retry_count = max(0, int(retries))
 
-    if expected_command is None and len(frame) >= 3:
-        expected_command = int(frame[2])
-
     last_exc = None
 
     with gimbal_io_lock:
-        with g1_process_io_guard():
-            for attempt in range(retry_count + 1):
-                connected_this_attempt = False
-                _g1_wait_command_gap()
+        for attempt in range(retry_count + 1):
+            connected_this_attempt = False
 
-                try:
-                    with socket.create_connection(
-                        (G1_CAMERA_IP, G1_CONTROL_PORT),
-                        timeout=G1_CONNECT_TIMEOUT,
-                    ) as sock:
-                        connected_this_attempt = True
-                        _g1_mark_transport_reachable()
+            _g1_wait_command_gap()
 
-                        sock.settimeout(G1_RESPONSE_TIMEOUT)
-                        sock.sendall(frame)
+            try:
+                with socket.create_connection(
+                    (G1_CAMERA_IP, G1_CONTROL_PORT),
+                    timeout=G1_CONNECT_TIMEOUT,
+                ) as sock:
+                    connected_this_attempt = True
+                    _g1_mark_transport_reachable()
 
-                        ignored = []
-                        parsed = None
+                    sock.settimeout(G1_RESPONSE_TIMEOUT)
+                    sock.sendall(frame)
+                    response = g1_recv_frame(sock)
 
-                        for _ in range(G1_MAX_UNRELATED_RESPONSE_FRAMES + 1):
-                            response = g1_recv_frame(sock)
-                            candidate = g1_parse_response(response)
+                parsed = g1_parse_response(response)
+                _g1_mark_protocol_success(
+                    affect_control_state=affect_control_state
+                )
+                return parsed
 
-                            if (
-                                expected_command is None
-                                or int(candidate["command"]) == int(expected_command)
-                            ):
-                                parsed = candidate
-                                break
+            except (socket.timeout, TimeoutError, ConnectionError, OSError) as exc:
+                last_exc = exc
 
-                            ignored.append(g1_format_hex(response))
-                            if G1_LOCK_VERBOSE:
-                                print(
-                                    "[WARN] G1 ignored unrelated response: "
-                                    "expected command=0x{:02X}, got=0x{:02X}, frame={}".format(
-                                        int(expected_command),
-                                        int(candidate["command"]),
-                                        g1_format_hex(response),
-                                    )
-                                )
+                if attempt < retry_count:
+                    # 查询类命令才会走到这里。控制命令默认 retry_count=0。
+                    time.sleep(max(0.08, G1_COMMAND_MIN_INTERVAL))
+                    continue
 
-                        if parsed is None:
-                            raise RuntimeError(
-                                "G1 未收到期望命令 0x{:02X} 的响应；忽略帧={}".format(
-                                    int(expected_command),
-                                    ignored,
-                                )
-                            )
-
-                    parsed["tx"] = bytes(frame)
-                    parsed["ignored_frames"] = ignored
-                    _g1_mark_protocol_success(
-                        affect_control_state=affect_control_state
-                    )
-                    return parsed
-
-                except (socket.timeout, TimeoutError, ConnectionError, OSError) as exc:
-                    last_exc = exc
-
-                    if attempt < retry_count:
-                        time.sleep(max(0.08, G1_COMMAND_MIN_INTERVAL))
-                        continue
-
-                    if connected_this_attempt:
-                        _g1_mark_operation_error(
-                            exc,
-                            operation=operation,
-                            affect_control_state=affect_control_state,
-                            transport_reachable=True,
-                        )
-                    else:
-                        _g1_mark_transport_error(exc)
-                    raise
-
-                except Exception as exc:
-                    last_exc = exc
+                if connected_this_attempt:
                     _g1_mark_operation_error(
                         exc,
                         operation=operation,
                         affect_control_state=affect_control_state,
-                        transport_reachable=connected_this_attempt,
+                        transport_reachable=True,
                     )
-                    raise
+                else:
+                    _g1_mark_transport_error(exc)
+                raise
 
-                finally:
-                    _g1_note_io_completed()
+            except Exception as exc:
+                last_exc = exc
+                _g1_mark_operation_error(
+                    exc,
+                    operation=operation,
+                    affect_control_state=affect_control_state,
+                    transport_reachable=connected_this_attempt,
+                )
+                raise
+
+            finally:
+                _g1_note_io_completed()
 
     if last_exc is not None:
         raise last_exc
     raise RuntimeError("G1 命令发送失败")
-
 
 
 def g1_send_command(
@@ -1668,7 +1455,6 @@ def g1_send_command(
         retries=retries,
         affect_control_state=affect_control_state,
         operation=operation,
-        expected_command=int(command) & 0xFF,
     )
 
 
@@ -1682,505 +1468,51 @@ def _g1_send_neutral(*, affect_control_state=True):
     )
 
 
-def _g1_update_home_lock_state(
-    *,
-    stage=None,
-    sequence_started=False,
-    home_tx=None,
-    home_ack=None,
-    centered=None,
-    stable_reads=None,
-    samples=None,
-    pose_error=None,
-    completed=False,
-):
-    """保留旧状态字段，供现有 API/前端兼容。"""
-    with gimbal_state_lock:
-        if stage is not None:
-            gimbal_state["home_lock_stage"] = str(stage)
-        if sequence_started:
-            gimbal_state["home_lock_sequence_count"] = int(
-                gimbal_state.get("home_lock_sequence_count") or 0
-            ) + 1
-        if home_tx is not None:
-            gimbal_state["home_last_tx"] = str(home_tx or "")
-        if home_ack is not None:
-            gimbal_state["home_last_ack"] = str(home_ack or "")
-        if centered is not None:
-            gimbal_state["home_centered"] = bool(centered)
-        if stable_reads is not None:
-            gimbal_state["home_stable_reads"] = int(stable_reads)
-        if samples is not None:
-            gimbal_state["home_pose_samples"] = list(samples)[-12:]
-        if pose_error is not None:
-            gimbal_state["home_pose_error"] = str(pose_error or "")
-        if completed:
-            gimbal_state["home_last_completed_at"] = time.time()
-
-
-def _g1_update_lock_state(
-    *,
-    active=None,
-    verified=None,
-    error=None,
-    reason=None,
-    attempted=False,
-    succeeded=False,
-    set_performed=False,
-    mode_before=None,
-    mode_after=None,
-    confirm_reads=None,
-    tx=None,
-    ack=None,
-    query_response=None,
-    next_retry_seconds=None,
-):
-    """兼容旧 lock 字段，同时更新新的默认模式状态。"""
-    now = time.time()
-    with gimbal_state_lock:
-        gimbal_state["lock_required"] = bool(G1_DEFAULT_MODE == 0)
-        if active is not None:
-            gimbal_state["lock_active"] = bool(active)
-            gimbal_state["mode_apply_active"] = bool(active)
-        if verified is not None:
-            gimbal_state["lock_verified"] = bool(
-                verified and G1_DEFAULT_MODE == 0
-            )
-            gimbal_state["default_mode_verified"] = bool(verified)
-        if error is not None:
-            text = str(error or "")
-            gimbal_state["lock_error"] = text
-            gimbal_state["mode_error"] = text
-        if reason is not None:
-            gimbal_state["lock_last_reason"] = str(reason or "")
-        if attempted:
-            gimbal_state["lock_attempts"] = int(
-                gimbal_state.get("lock_attempts") or 0
-            ) + 1
-            gimbal_state["lock_last_attempt_at"] = now
-        if set_performed:
-            gimbal_state["lock_set_count"] = int(
-                gimbal_state.get("lock_set_count") or 0
-            ) + 1
-            gimbal_state["lock_last_set_at"] = now
-        if succeeded:
-            gimbal_state["lock_last_success_at"] = now
-        if mode_before is not None:
-            gimbal_state["lock_mode_before"] = int(mode_before)
-        if mode_after is not None:
-            gimbal_state["lock_mode_after"] = int(mode_after)
-        if confirm_reads is not None:
-            gimbal_state["lock_confirm_reads"] = [
-                int(value) for value in confirm_reads
-            ]
-        if tx is not None:
-            gimbal_state["lock_last_tx"] = str(tx or "")
-        if ack is not None:
-            gimbal_state["lock_last_ack"] = str(ack or "")
-        if query_response is not None:
-            gimbal_state["lock_last_query_response"] = str(
-                query_response or ""
-            )
-        if next_retry_seconds is not None:
-            gimbal_state["lock_next_retry_seconds"] = max(
-                0.0, float(next_retry_seconds)
-            )
-
-
 def g1_query_mode():
-    """读取真实云台模式；返回参数第一个字节 0/1/2/3。"""
     with gimbal_action_lock:
-        response = g1_send_frame(
-            G1_FRAME_QUERY_GIMBAL_MODE,
+        response = g1_send_command(
+            0x00,
+            bytes([0x05, 0x01]),
             affect_control_state=False,
             operation="mode",
-            expected_command=0x00,
         )
         params = response["params"]
-        if len(params) < 1:
-            raise ValueError(
-                "G1 云台模式响应没有参数：{}".format(
-                    g1_format_hex(response["raw"])
-                )
-            )
-        mode = int(params[0])
-        if mode not in G1_MODE_NAME:
-            raise ValueError(
-                "G1 返回未知云台模式 {}，原始帧 {}".format(
-                    mode, g1_format_hex(response["raw"])
-                )
-            )
+        if not params:
+            raise ValueError("G1 云台模式响应没有参数")
+
+        mode = int(params[-1])
         with gimbal_state_lock:
             gimbal_state["mode"] = mode
-            gimbal_state["mode_name"] = G1_MODE_NAME[mode]
-            gimbal_state["default_mode"] = int(G1_DEFAULT_MODE)
-            gimbal_state["default_mode_name"] = G1_MODE_NAME[G1_DEFAULT_MODE]
-            gimbal_state["default_mode_verified"] = mode == G1_DEFAULT_MODE
-            if mode == G1_DEFAULT_MODE:
-                gimbal_state["mode_error"] = ""
-        _g1_update_lock_state(
-            query_response=g1_format_hex(response["raw"]),
-            mode_after=mode,
-            verified=(mode == G1_DEFAULT_MODE),
-        )
+            gimbal_state["mode_name"] = G1_MODE_NAME.get(mode, "未知模式")
         return mode
 
 
-def _g1_send_mode_unverified(mode):
-    """发送模式命令并校验通用 ACK；ACK 不等于模式回读。"""
-    mode = int(mode)
-    if mode not in G1_MODE_NAME:
-        raise ValueError("云台模式只允许 0、1、2、3")
-    frame = g1_build_frame(0x05, bytes([0x01, mode]))
-    response = g1_send_frame(
-        frame,
-        retries=0,
-        affect_control_state=True,
-        operation="control",
-        expected_command=0x05,
-    )
-    _g1_update_lock_state(
-        tx=g1_format_hex(frame),
-        ack=g1_format_hex(response["raw"]),
-        set_performed=True,
-    )
-    return response
-
-
-def g1_set_mode(mode, verify=True):
-    """
-    快速设置云台模式。
-
-    不执行回中、不进行姿态轮询；仅发送一次模式命令，短暂等待后最多回读一次。
-    """
+def g1_set_mode(mode):
     mode = int(mode)
     if mode not in G1_MODE_NAME:
         raise ValueError("云台模式只允许 0、1、2、3")
 
     with gimbal_action_lock:
-        with gimbal_state_lock:
-            mode_before = gimbal_state.get("mode")
-            gimbal_state["mode_apply_active"] = True
-            gimbal_state["mode_error"] = ""
-
-        try:
-            response = _g1_send_mode_unverified(mode)
-            actual_mode = mode
-
-            if verify:
-                time.sleep(G1_LOCK_APPLY_DELAY_SECONDS)
-                actual_mode = g1_query_mode()
-                if actual_mode != mode:
-                    # 只快速补发一次，不进入几秒钟长重试。
-                    response = _g1_send_mode_unverified(mode)
-                    time.sleep(G1_LOCK_APPLY_DELAY_SECONDS)
-                    actual_mode = g1_query_mode()
-
-            if actual_mode != mode:
-                raise RuntimeError(
-                    "G1 模式设置未生效：请求={}，回读={}".format(
-                        mode, actual_mode
-                    )
-                )
-
-            with gimbal_state_lock:
-                gimbal_state["mode"] = actual_mode
-                gimbal_state["mode_name"] = G1_MODE_NAME[actual_mode]
-                gimbal_state["default_mode_verified"] = (
-                    actual_mode == G1_DEFAULT_MODE
-                )
-                gimbal_state["mode_error"] = ""
-
-            _g1_update_lock_state(
-                active=False,
-                verified=(actual_mode == G1_DEFAULT_MODE),
-                error="",
-                succeeded=True,
-                mode_before=mode_before,
-                mode_after=actual_mode,
-                confirm_reads=[actual_mode],
-                next_retry_seconds=G1_LOCK_VERIFY_INTERVAL_SECONDS,
-            )
-            return actual_mode
-
-        except Exception as exc:
-            with gimbal_state_lock:
-                gimbal_state["mode_error"] = str(exc)
-            _g1_update_lock_state(
-                active=False,
-                verified=False,
-                error=str(exc),
-            )
-            raise
-        finally:
-            with gimbal_state_lock:
-                gimbal_state["mode_apply_active"] = False
-
-
-def g1_apply_default_mode(reason="background", verify=True):
-    """把云台恢复到配置的默认模式，默认是 mode=3 全跟随。"""
-    _g1_update_lock_state(
-        active=True,
-        verified=False,
-        error="",
-        reason=reason,
-        attempted=True,
-        next_retry_seconds=0.0,
-    )
-    mode = g1_set_mode(G1_DEFAULT_MODE, verify=verify)
-    return {
-        "ok": True,
-        "mode": mode,
-        "mode_name": G1_MODE_NAME[mode],
-        "default_mode": G1_DEFAULT_MODE,
-        "default_mode_name": G1_MODE_NAME[G1_DEFAULT_MODE],
-    }
-
-
-def g1_home_then_mode(mode=None, reason="manual_home"):
-    """
-    快速回中后恢复指定模式。
-
-    只等待一个很短的协议间隔，不再做 4~5 秒姿态稳定轮询。
-    """
-    global gimbal_roll_target
-    target_mode = G1_DEFAULT_MODE if mode is None else int(mode)
-    if target_mode not in G1_MODE_NAME:
-        raise ValueError("云台模式只允许 0、1、2、3")
-
-    with gimbal_action_lock:
-        gimbal_stop_event.set()
-        _cancel_gimbal_watchdog()
-        _g1_set_motion_state(False, "", 0, 0)
-
-        _g1_update_home_lock_state(
-            stage="sending_home",
-            sequence_started=True,
-            centered=False,
-            stable_reads=0,
-            samples=[],
-            pose_error="",
-        )
-        home_response = g1_send_frame(
-            G1_FRAME_HOME,
+        g1_send_command(
+            0x05,
+            bytes([0x01, mode]),
             retries=0,
-            affect_control_state=True,
             operation="control",
-            expected_command=0x05,
         )
-        _g1_update_home_lock_state(
-            stage="waiting_home",
-            home_tx=g1_format_hex(G1_FRAME_HOME),
-            home_ack=g1_format_hex(home_response["raw"]),
-        )
-        time.sleep(G1_HOME_MIN_SETTLE_SECONDS)
-        actual_mode = g1_set_mode(target_mode, verify=True)
-
-        with gimbal_roll_lock:
-            gimbal_roll_target = 0.0
-        gimbal_stop_event.clear()
-
-        _g1_update_home_lock_state(
-            stage="completed",
-            centered=False,
-            stable_reads=0,
-            samples=[],
-            pose_error="",
-            completed=True,
-        )
-
-    return {
-        "locked": actual_mode == 0,
-        "mode_before": None,
-        "mode_after": actual_mode,
-        "confirm_reads": [actual_mode],
-        "set_attempts": 1,
-        "home": {
-            "centered": False,
-            "stable_reads": 0,
-            "samples": [],
-            "pose": None,
-            "pose_error": "",
-        },
-        "home_ack": g1_format_hex(home_response["raw"]),
-    }
-
-
-def g1_home_then_lock(reason="manual_lock", force=True):
-    # 兼容旧 API：显式按钮需要锁定时，快速回中后设置 mode=0。
-    return g1_home_then_mode(mode=0, reason=reason)
-
-
-def g1_lock_mode_once(force=False, reason="manual_lock"):
-    return g1_home_then_lock(reason=reason, force=force)
-
-
-def g1_require_lock_mode():
-    # 不再在每次方向控制前强制回中/锁定，避免明显延迟。
-    return
+        with gimbal_state_lock:
+            gimbal_state["mode"] = mode
+            gimbal_state["mode_name"] = G1_MODE_NAME[mode]
+        return mode
 
 
 def g1_ensure_manual_mode():
-    # 摇杆命令在当前模式下直接发送；模式由独立低频后台线程维护。
-    return
-
-
-def _acquire_g1_lock_worker_process():
-    global gimbal_lock_worker_process_fp
-    if gimbal_lock_worker_process_fp is not None:
-        return True
-    if fcntl is None:
-        return True
-    fp = open(G1_WORKER_PROCESS_LOCK_PATH, "a+", encoding="utf-8")
-    try:
-        fcntl.flock(fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        fp.close()
-        return False
-    fp.seek(0)
-    fp.truncate()
-    fp.write(
-        "pid={} started={} default_mode={}\n".format(
-            os.getpid(),
-            time.strftime("%Y-%m-%d %H:%M:%S"),
-            G1_DEFAULT_MODE,
-        )
-    )
-    fp.flush()
-    gimbal_lock_worker_process_fp = fp
-    with gimbal_state_lock:
-        gimbal_state["lock_worker_pid"] = os.getpid()
-    return True
-
-
-def _release_g1_lock_worker_process():
-    global gimbal_lock_worker_process_fp
-    fp = gimbal_lock_worker_process_fp
-    gimbal_lock_worker_process_fp = None
-    if fp is None:
-        return
-    try:
-        if fcntl is not None:
-            fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
-    except Exception:
-        pass
-    try:
-        fp.close()
-    except Exception:
-        pass
-    with gimbal_state_lock:
-        gimbal_state["lock_worker_pid"] = None
-
-
-def g1_lock_worker():
-    """低频默认模式保持线程；不回中，不长等待，不干扰实时控制。"""
-    if gimbal_lock_worker_stop_event.wait(G1_LOCK_START_DELAY_SECONDS):
+    if not G1_AUTO_LOCK_MODE:
         return
 
-    retry_delay = float(G1_LOCK_RETRY_MIN_SECONDS)
-    while not gimbal_lock_worker_stop_event.is_set():
-        try:
-            with gimbal_state_lock:
-                control_is_active = bool(
-                    gimbal_state.get("moving") or gimbal_state.get("busy")
-                )
-
-            # 按住方向键期间绝不插入模式查询，保证控制流畅。
-            if control_is_active:
-                if gimbal_lock_worker_stop_event.wait(1.0):
-                    break
-                continue
-
-            if G1_DEFAULT_MODE_ENABLED:
-                try:
-                    actual_mode = g1_query_mode()
-                except Exception:
-                    actual_mode = None
-
-                if actual_mode != G1_DEFAULT_MODE:
-                    g1_apply_default_mode(
-                        reason="background_default_mode",
-                        verify=True,
-                    )
-                else:
-                    _g1_update_lock_state(
-                        active=False,
-                        verified=True,
-                        error="",
-                        reason="background_verified",
-                        succeeded=True,
-                        mode_after=actual_mode,
-                        confirm_reads=[actual_mode],
-                        next_retry_seconds=G1_LOCK_VERIFY_INTERVAL_SECONDS,
-                    )
-
-            retry_delay = float(G1_LOCK_RETRY_MIN_SECONDS)
-            wait_seconds = float(G1_LOCK_VERIFY_INTERVAL_SECONDS)
-
-        except Exception as exc:
-            wait_seconds = retry_delay
-            _g1_update_lock_state(
-                active=False,
-                verified=False,
-                error=str(exc),
-                reason="background_default_mode",
-                next_retry_seconds=wait_seconds,
-            )
-            print(
-                "[WARN] G1 default mode retry in {:.1f}s: {}".format(
-                    wait_seconds, exc
-                )
-            )
-            retry_delay = min(
-                float(G1_LOCK_RETRY_MAX_SECONDS),
-                max(float(G1_LOCK_RETRY_MIN_SECONDS), retry_delay * 2.0),
-            )
-
-        if gimbal_lock_worker_stop_event.wait(wait_seconds):
-            break
-
-
-def start_g1_lock_worker():
-    global gimbal_lock_worker_thread
-    if not G1_DEFAULT_MODE_ENABLED:
-        return False
-
-    with gimbal_lock_worker_thread_lock:
-        if (
-            gimbal_lock_worker_thread is not None
-            and gimbal_lock_worker_thread.is_alive()
-        ):
-            return True
-        if not _acquire_g1_lock_worker_process():
-            return False
-
-        gimbal_lock_worker_stop_event.clear()
-        gimbal_lock_worker_thread = threading.Thread(
-            target=g1_lock_worker,
-            name="g1-default-mode-watchdog",
-            daemon=True,
-        )
-        gimbal_lock_worker_thread.start()
-        print(
-            "[INFO] G1 default mode watchdog started: mode={} ({}), pid={}".format(
-                G1_DEFAULT_MODE,
-                G1_MODE_NAME.get(G1_DEFAULT_MODE, "未知"),
-                os.getpid(),
-            )
-        )
-        return True
-
-
-def stop_g1_lock_worker():
-    global gimbal_lock_worker_thread
-    gimbal_lock_worker_stop_event.set()
-    with gimbal_lock_worker_thread_lock:
-        thread = gimbal_lock_worker_thread
-        gimbal_lock_worker_thread = None
-    if thread is not None and thread.is_alive():
-        thread.join(timeout=2.0)
-    _release_g1_lock_worker_process()
-    _g1_update_lock_state(active=False, next_retry_seconds=0.0)
+    with gimbal_state_lock:
+        current_mode = gimbal_state.get("mode")
+    if current_mode != 0x00:
+        g1_set_mode(0x00)
 
 
 def g1_query_pose():
@@ -2284,66 +1616,6 @@ def g1_get_public_status(refresh_pose=False, probe_tcp=False):
 
             "mode": gimbal_state["mode"],
             "mode_name": gimbal_state["mode_name"],
-            "default_mode": int(G1_DEFAULT_MODE),
-            "default_mode_name": G1_MODE_NAME[G1_DEFAULT_MODE],
-            "default_mode_enabled": bool(G1_DEFAULT_MODE_ENABLED),
-            "default_mode_verified": bool(
-                gimbal_state.get("default_mode_verified")
-            ),
-            "mode_apply_active": bool(
-                gimbal_state.get("mode_apply_active")
-            ),
-            "mode_error": gimbal_state.get("mode_error") or "",
-
-            "lock_required": bool(gimbal_state.get("lock_required")),
-            "lock_active": bool(gimbal_state.get("lock_active")),
-            "lock_verified": bool(gimbal_state.get("lock_verified")),
-            "lock_error": gimbal_state.get("lock_error") or "",
-            "lock_attempts": int(gimbal_state.get("lock_attempts") or 0),
-            "lock_set_count": int(gimbal_state.get("lock_set_count") or 0),
-            "lock_mode_before": gimbal_state.get("lock_mode_before"),
-            "lock_mode_after": gimbal_state.get("lock_mode_after"),
-            "lock_confirm_reads": list(
-                gimbal_state.get("lock_confirm_reads") or []
-            ),
-            "lock_last_reason": gimbal_state.get("lock_last_reason") or "",
-            "lock_last_tx": gimbal_state.get("lock_last_tx") or "",
-            "lock_last_ack": gimbal_state.get("lock_last_ack") or "",
-            "lock_last_query_response": (
-                gimbal_state.get("lock_last_query_response") or ""
-            ),
-            "lock_last_attempt_at": float(
-                gimbal_state.get("lock_last_attempt_at") or 0.0
-            ),
-            "lock_last_set_at": float(
-                gimbal_state.get("lock_last_set_at") or 0.0
-            ),
-            "lock_last_success_at": float(
-                gimbal_state.get("lock_last_success_at") or 0.0
-            ),
-            "lock_next_retry_seconds": float(
-                gimbal_state.get("lock_next_retry_seconds") or 0.0
-            ),
-            "lock_worker_pid": gimbal_state.get("lock_worker_pid"),
-
-            "home_lock_stage": gimbal_state.get("home_lock_stage") or "idle",
-            "home_lock_sequence_count": int(
-                gimbal_state.get("home_lock_sequence_count") or 0
-            ),
-            "home_last_tx": gimbal_state.get("home_last_tx") or "",
-            "home_last_ack": gimbal_state.get("home_last_ack") or "",
-            "home_centered": bool(gimbal_state.get("home_centered")),
-            "home_stable_reads": int(
-                gimbal_state.get("home_stable_reads") or 0
-            ),
-            "home_pose_samples": list(
-                gimbal_state.get("home_pose_samples") or []
-            ),
-            "home_pose_error": gimbal_state.get("home_pose_error") or "",
-            "home_last_completed_at": float(
-                gimbal_state.get("home_last_completed_at") or 0.0
-            ),
-
             "moving": bool(gimbal_state["moving"]),
             "axis": gimbal_state["axis"],
             "direction": int(gimbal_state["direction"]),
@@ -2506,9 +1778,10 @@ def _g1_try_recovery_stop(reason):
 
 def g1_start_jog(axis, direction, speed=17, roll_step=5.0):
     """
-    按住方向键的低延迟 start API。
+    兼容旧 start API。
 
-    直接发送运动帧；松开时由 stop API 发送零速帧，避免每次启动前等待。
+    即使是 start 模式，也在新动作前自动插入一次零速中和，
+    防止连续方向命令直接覆盖设备内部尚未稳定的上一状态。
     """
     global gimbal_roll_target
 
@@ -2527,8 +1800,16 @@ def g1_start_jog(axis, direction, speed=17, roll_step=5.0):
             _cancel_gimbal_watchdog()
             g1_ensure_manual_mode()
 
-            # 按住控制直接发送运动帧；上一次 pointerup 已发送 Stop，
-            # 不再额外插入 Neutral + 等待，减少触控延迟。
+            _g1_send_neutral()
+            if gimbal_stop_event.wait(G1_NEUTRAL_SETTLE_SECONDS):
+                _g1_set_motion_state(False, "", 0, 0)
+                return {
+                    "response": None,
+                    "interrupted": True,
+                    "one_shot": True,
+                    "sequence": sequence,
+                }
+
             if axis == "roll":
                 reference = _g1_get_roll_reference()
                 target_roll = (
@@ -2830,7 +2111,7 @@ def g1_stop_motion(refresh_pose=False):
     response = _g1_send_neutral()
     _g1_set_motion_state(False, "", 0, 0)
 
-    # Stop ACK 到达后立即返回，不增加人工等待。
+    time.sleep(G1_POST_ACTION_SETTLE_SECONDS)
 
     # refresh_pose 参数保留兼容，但稳定版默认禁止 Stop 后自动查姿态。
     pose = g1_get_cached_pose(refresh=False)
@@ -2845,13 +2126,62 @@ def stop_gimbal_motion_safe():
 
 
 def g1_reset_home():
-    """快速回中，然后恢复配置的默认模式（默认 mode=3 全跟随）。"""
-    result = g1_home_then_mode(
-        mode=G1_DEFAULT_MODE,
-        reason="reset_home_button",
-    )
-    pose = g1_get_cached_pose(refresh=False)
-    return result, pose
+    """停止当前运动并执行协议中的回中命令；回中后不自动读取姿态。"""
+    global gimbal_roll_target
+
+    gimbal_stop_event.set()
+
+    with gimbal_action_lock:
+        sequence = _g1_begin_action("reset_home")
+        try:
+            with gimbal_pulse_lock:
+                _cancel_gimbal_watchdog()
+
+                _g1_send_neutral()
+                time.sleep(G1_NEUTRAL_SETTLE_SECONDS)
+
+                g1_ensure_manual_mode()
+                response = g1_send_command(
+                    0x05,
+                    bytes([0x02]),
+                    retries=0,
+                    operation="control",
+                )
+
+                _g1_set_motion_state(False, "", 0, 0)
+
+                # “回中”后横滚软件目标重新以 0° 为基准。
+                with gimbal_roll_lock:
+                    gimbal_roll_target = 0.0
+
+                with gimbal_state_lock:
+                    gimbal_state["pose_ok"] = None
+                    gimbal_state["pose_error"] = ""
+                    gimbal_state["pose_updated_at"] = 0.0
+                    gimbal_state["pose"] = {
+                        "yaw": 0.0,
+                        "roll": 0.0,
+                        "pitch": 0.0,
+                        "base_yaw": 0.0,
+                        "base_roll": 0.0,
+                        "base_pitch": 0.0,
+                    }
+
+                time.sleep(max(0.55, G1_POST_ACTION_SETTLE_SECONDS))
+                return response, g1_get_cached_pose(refresh=False)
+
+        except Exception as exc:
+            recovered, recovery_error = _g1_try_recovery_stop(
+                "reset_home: {}".format(exc)
+            )
+            raise G1ControlOperationError(
+                exc,
+                recovered=recovered,
+                recovery_error=recovery_error,
+            ) from exc
+
+        finally:
+            _g1_finish_action(sequence)
 
 
 # =========================
@@ -5851,13 +5181,6 @@ def get_video_config():
 # =========================
 # 页面
 # =========================
-@app.before_request
-def ensure_g1_lock_worker_for_wsgi():
-    # 兼容 flask run / gunicorn / systemd；后台只低频维护默认模式。
-    if G1_DEFAULT_MODE_ENABLED:
-        start_g1_lock_worker()
-
-
 @app.route("/")
 def index():
     return render_template("index1.html")
@@ -6294,20 +5617,9 @@ def api_status():
         "gimbal_connected": gimbal["connected"],
         "gimbal_mode": gimbal["mode"],
         "gimbal_mode_name": gimbal["mode_name"],
-        "gimbal_default_mode": gimbal["default_mode"],
-        "gimbal_default_mode_name": gimbal["default_mode_name"],
-        "gimbal_default_mode_verified": gimbal["default_mode_verified"],
-        "gimbal_mode_apply_active": gimbal["mode_apply_active"],
-        "gimbal_mode_error": gimbal["mode_error"],
         "gimbal_moving": gimbal["moving"],
         "gimbal_pose": gimbal["pose"],
         "gimbal_error": gimbal["last_error"],
-        "gimbal_lock_required": gimbal["lock_required"],
-        "gimbal_lock_active": gimbal["lock_active"],
-        "gimbal_lock_verified": gimbal["lock_verified"],
-        "gimbal_lock_error": gimbal["lock_error"],
-        "gimbal_lock_set_count": gimbal["lock_set_count"],
-        "gimbal_lock_confirm_reads": gimbal["lock_confirm_reads"],
 
         # 机器人状态
         "robot_running": robot_running,
@@ -6354,20 +5666,9 @@ def api_system_status():
         "gimbal_connected": gimbal["connected"],
         "gimbal_mode": gimbal["mode"],
         "gimbal_mode_name": gimbal["mode_name"],
-        "gimbal_default_mode": gimbal["default_mode"],
-        "gimbal_default_mode_name": gimbal["default_mode_name"],
-        "gimbal_default_mode_verified": gimbal["default_mode_verified"],
-        "gimbal_mode_apply_active": gimbal["mode_apply_active"],
-        "gimbal_mode_error": gimbal["mode_error"],
         "gimbal_moving": gimbal["moving"],
         "gimbal_pose": gimbal["pose"],
         "gimbal_error": gimbal["last_error"],
-        "gimbal_lock_required": gimbal["lock_required"],
-        "gimbal_lock_active": gimbal["lock_active"],
-        "gimbal_lock_verified": gimbal["lock_verified"],
-        "gimbal_lock_error": gimbal["lock_error"],
-        "gimbal_lock_set_count": gimbal["lock_set_count"],
-        "gimbal_lock_confirm_reads": gimbal["lock_confirm_reads"],
         "robot_running": robot_running,
         "speed": robot_state["linear_speed"],
         "fan_speed": robot_state["fan_speed"],
@@ -6829,16 +6130,8 @@ def api_gimbal_status():
 
     if not tcp_ok:
         message = status["tcp_error"] or "G1 云台 TCP 控制端口未连接"
-    elif status.get("mode_apply_active"):
-        message = "G1 TCP 已连接，正在快速设置默认模式"
-    elif status.get("default_mode_verified"):
-        message = "云台已确认默认模式：{}".format(
-            status.get("default_mode_name") or "未知"
-        )
-    elif status.get("mode") is not None:
-        message = "云台已连接，当前模式：{}".format(
-            status.get("mode_name") or status.get("mode")
-        )
+    elif status["control_ready"]:
+        message = "云台控制已连接，控制就绪"
     elif status["busy"]:
         message = "G1 TCP 已连接，云台正在执行控制动作"
     else:
@@ -7059,13 +6352,12 @@ def api_gimbal_jog_stop():
 @app.route("/api/gimbal/reset", methods=["POST"])
 def api_gimbal_reset():
     try:
-        result, pose = g1_reset_home()
+        _, pose = g1_reset_home()
         return jsonify({
             "ok": True,
-            "message": "云台已快速回中，并恢复默认模式：{}".format(G1_MODE_NAME[G1_DEFAULT_MODE]),
-            "result": result,
+            "message": "云台已执行回中并恢复控制就绪",
             "gimbal_pose": pose,
-            "pose_fresh": bool(result.get("home", {}).get("pose")),
+            "pose_fresh": False,
             "gimbal": g1_get_public_status(refresh_pose=False),
         })
     except G1ControlOperationError as exc:
@@ -7089,45 +6381,6 @@ def api_gimbal_reset():
         }), 503
 
 
-@app.route("/api/gimbal/lock", methods=["POST"])
-def api_gimbal_lock():
-    """兼容旧按钮：直接设置锁定模式 mode=0，不强制回中。"""
-    try:
-        mode = g1_set_mode(0, verify=True)
-        status = g1_get_public_status(refresh_pose=False)
-        return jsonify({
-            "ok": mode == 0,
-            "message": "云台已切换为锁定模式",
-            "mode": mode,
-            "mode_name": G1_MODE_NAME[mode],
-            "gimbal": status,
-        })
-    except Exception as exc:
-        status = g1_get_public_status(refresh_pose=False)
-        return jsonify({
-            "ok": False,
-            "message": "锁定模式设置失败: {}".format(exc),
-            "mode": status["mode"],
-            "mode_name": status["mode_name"],
-            "gimbal": status,
-        }), 503
-
-
-@app.route("/api/gimbal/lock/status", methods=["GET"])
-def api_gimbal_lock_status():
-    status = g1_get_public_status(refresh_pose=False)
-    locked = bool(status["tcp_reachable"] and status["mode"] == 0)
-    return jsonify({
-        "ok": locked,
-        "message": (
-            "LK_MODE=0 已确认"
-            if locked
-            else status.get("mode_error") or "LK_MODE 尚未确认"
-        ),
-        "gimbal": status,
-    })
-
-
 @app.route("/api/gimbal/mode", methods=["GET", "POST"])
 def api_gimbal_mode():
     try:
@@ -7135,15 +6388,12 @@ def api_gimbal_mode():
             mode = g1_query_mode()
         else:
             data = request.get_json(silent=True) or {}
-            requested_mode = int(data.get("mode", G1_DEFAULT_MODE))
-            mode = g1_set_mode(requested_mode, verify=True)
+            mode = g1_set_mode(int(data.get("mode", 0)))
 
         return jsonify({
             "ok": True,
             "mode": mode,
             "mode_name": G1_MODE_NAME.get(mode, "未知模式"),
-            "default_mode": G1_DEFAULT_MODE,
-            "default_mode_name": G1_MODE_NAME[G1_DEFAULT_MODE],
             "gimbal": g1_get_public_status(refresh_pose=False),
         })
     except (ValueError, TypeError) as exc:
@@ -7152,30 +6402,6 @@ def api_gimbal_mode():
         return jsonify({
             "ok": False,
             "message": str(exc),
-            "gimbal": g1_get_public_status(refresh_pose=False),
-        }), 503
-
-
-@app.route("/api/gimbal/default_mode", methods=["POST"])
-def api_gimbal_default_mode():
-    """立即恢复程序配置的默认模式；默认是 mode=3 全跟随。"""
-    try:
-        result = g1_apply_default_mode(
-            reason="api_default_mode",
-            verify=True,
-        )
-        return jsonify({
-            "ok": True,
-            "message": "默认模式已生效：{}".format(
-                G1_MODE_NAME[G1_DEFAULT_MODE]
-            ),
-            **result,
-            "gimbal": g1_get_public_status(refresh_pose=False),
-        })
-    except Exception as exc:
-        return jsonify({
-            "ok": False,
-            "message": "默认模式设置失败: {}".format(exc),
             "gimbal": g1_get_public_status(refresh_pose=False),
         }), 503
 
@@ -7202,10 +6428,6 @@ def api_shutdown():
     def do_shutdown():
         try:
             stop_obstacle_avoidance_worker()
-        except Exception:
-            pass
-        try:
-            stop_g1_lock_worker()
         except Exception:
             pass
         try:
@@ -7264,10 +6486,6 @@ def shutdown_legacy():
         except Exception:
             pass
         try:
-            stop_g1_lock_worker()
-        except Exception:
-            pass
-        try:
             stop_gimbal_motion_safe()
         except Exception:
             pass
@@ -7308,10 +6526,6 @@ def shutdown_legacy():
 def cleanup():
     try:
         stop_obstacle_avoidance_worker()
-    except Exception:
-        pass
-    try:
-        stop_g1_lock_worker()
     except Exception:
         pass
     try:
@@ -7361,21 +6575,6 @@ def cleanup():
 atexit.register(cleanup)
 
 
-def bootstrap_g1_lock_mode():
-    if not G1_DEFAULT_MODE_ENABLED:
-        print("[INFO] G1 default mode watchdog disabled")
-        return
-    try:
-        validate_g1_protocol_constants()
-        start_g1_lock_worker()
-    except Exception as exc:
-        print("[WARN] G1 default mode bootstrap failed: {}".format(exc))
-
-
-# 关键：不再只依赖 __main__。
-bootstrap_g1_lock_mode()
-
-
 if __name__ == "__main__":
     validate_video_constants()
 
@@ -7395,12 +6594,6 @@ if __name__ == "__main__":
         start_webrtc_network_watcher()
     except Exception as e:
         print(f"[WARN] WebRTC network watcher start failed: {e}")
-
-    try:
-        validate_g1_protocol_constants()
-        start_g1_lock_worker()
-    except Exception as e:
-        print(f"[WARN] G1 default mode watchdog start failed: {e}")
 
     try:
         ensure_streamer_ready()
