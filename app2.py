@@ -840,6 +840,7 @@ if MEDIAMTX_LOG_LEVEL not in ("error", "warn", "info", "debug"):
     MEDIAMTX_LOG_LEVEL = "info"
 
 FFMPEG_BIN_ENV = "FFMPEG_BIN"
+GST_LAUNCH_BIN_ENV = "GST_LAUNCH_BIN"
 
 
 # =========================
@@ -1060,13 +1061,21 @@ G1_PITCH_LIMIT = (-90.0, 90.0)
 G1_POSE_CACHE_SECONDS = 1.0
 
 # =========================
-# 新相机栈（已验证可用）
+# 4K UVC USB 摄像头配置（树莓派 5）
 # =========================
-CAMERA_STACK_ROOT = Path("/opt/rpi-cam-stack")
-CAMERA_BIN = CAMERA_STACK_ROOT / "bin" / "rpicam-vid"
-CAMERA_LIB_DIR = CAMERA_STACK_ROOT / "lib" / "aarch64-linux-gnu"
-CAMERA_IPA_MODULE_DIR = CAMERA_LIB_DIR / "libcamera" / "ipa"
-CAMERA_IPA_PROXY_DIR = CAMERA_STACK_ROOT / "libexec" / "libcamera"
+# 摄像头固定以原生 3840x2160@30 MJPG 采集；浏览器端默认输出
+# 1920x1080@30 H.264/WebRTC。这样既使用 4K 传感器完整视场与缩小采样质量，
+# 又避免树莓派 5 对 4K MJPG 解码后再进行 4K H.264 软件编码而造成卡顿。
+USB_CAMERA_DEVICE = os.environ.get("USB_CAMERA_DEVICE", "/dev/video0").strip() or "/dev/video0"
+USB_CAPTURE_WIDTH = max(320, int(os.environ.get("USB_CAPTURE_WIDTH", "3840")))
+USB_CAPTURE_HEIGHT = max(240, int(os.environ.get("USB_CAPTURE_HEIGHT", "2160")))
+USB_CAPTURE_FPS = max(1, min(60, int(os.environ.get("USB_CAPTURE_FPS", "30"))))
+USB_CAPTURE_FORMAT = os.environ.get("USB_CAPTURE_FORMAT", "mjpeg").strip().lower() or "mjpeg"
+if USB_CAPTURE_FORMAT not in {"mjpeg", "mjpg"}:
+    USB_CAPTURE_FORMAT = "mjpeg"
+USB_INPUT_QUEUE_SIZE = max(2, min(32, int(os.environ.get("USB_INPUT_QUEUE_SIZE", "4"))))
+USB_X264_THREADS = max(1, min(8, int(os.environ.get("USB_X264_THREADS", "4"))))
+USB_AUTOFOCUS = os.environ.get("USB_AUTOFOCUS", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 # =========================
@@ -1100,21 +1109,41 @@ CLEANING_RAMP_DELAY = 0.10
 # =========================
 # 视频配置
 # =========================
+# WebRTC 输出分辨率。USB 摄像头输入始终保持 4K30 MJPG；这里控制浏览器收到的
+# H.264 分辨率。本测试版在已验证 1440P30 流畅的基础上，默认提升到
+# 3200x1800@20。该档每秒编码像素量与 2560x1440@30 接近，因此通常比直接上
+# 4K30 更容易保持低延迟，同时能明显增加静态细节。4K 档仍限制为 15 FPS。
 RESOLUTION_OPTIONS = [
-    (640, 360),
-    (1280, 720),
-    (1920, 1080),
+    (1280, 720),          # 低延迟档
+    (1920, 1080),         # 流畅档
+    (2560, 1440),         # 高清流畅档
+    (3200, 1800),         # 更高清测试档（默认）
+    (3840, 2160),         # 4K 极清档，建议 15 FPS
 ]
-FPS_OPTIONS = [15, 24, 30, 45, 60]
+FPS_OPTIONS = [15, 20, 24, 30]
 
-DEFAULT_WIDTH = 1280
-DEFAULT_HEIGHT = 720
-DEFAULT_FPS = 15
+DEFAULT_WIDTH = 3200
+DEFAULT_HEIGHT = 1800
+DEFAULT_FPS = 20
 
+# ultrafast 编码压缩效率较低，提高码率可以在几乎不增加编码复杂度的情况下
+# 减少细节涂抹和大块压缩纹理。局域网使用时优先保证有线或稳定的 5 GHz Wi-Fi。
 BITRATE_MAP = {
-    (640, 360): 1200000,
-    (1280, 720): 3500000,
-    (1920, 1080): 6000000,
+    (1280, 720): 5000000,
+    (1920, 1080): 8500000,
+    (2560, 1440): 14000000,
+    (3200, 1800): 18000000,
+    (3840, 2160): 22000000,
+}
+
+# 不同输出分辨率允许的最高帧率。3200x1800@20 是本次逐级提高清晰度的
+# 首选测试档；4K H.264 仍限制在 15 FPS，避免树莓派 5 软件编码负载突增。
+MAX_FPS_BY_RESOLUTION = {
+    (1280, 720): 30,
+    (1920, 1080): 30,
+    (2560, 1440): 30,
+    (3200, 1800): 20,
+    (3840, 2160): 15,
 }
 
 
@@ -1861,14 +1890,63 @@ def kill_stray_mediamtx():
             pass
 
 
+def find_gst_launch_bin():
+    envp = os.environ.get(GST_LAUNCH_BIN_ENV, "").strip()
+    if envp:
+        p = Path(envp).expanduser()
+        if p.exists() and os.access(str(p), os.X_OK):
+            return str(p)
+    return shutil.which("gst-launch-1.0")
+
+
+def gst_element_available(name):
+    inspect_bin = shutil.which("gst-inspect-1.0")
+    if not inspect_bin:
+        return False
+    try:
+        result = subprocess.run(
+            [inspect_bin, name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            check=False,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def require_camera_stack():
-    missing = []
-    for p in [CAMERA_BIN, CAMERA_LIB_DIR, CAMERA_IPA_MODULE_DIR, CAMERA_IPA_PROXY_DIR]:
-        if not p.exists():
-            missing.append(str(p))
+    """兼容原调用名：验证 USB 摄像头与 GStreamer 低延迟采集链路。"""
+    if not find_gst_launch_bin():
+        raise RuntimeError(
+            "未找到 gst-launch-1.0。请安装：sudo apt install "
+            "gstreamer1.0-tools gstreamer1.0-plugins-base "
+            "gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly "
+            "gstreamer1.0-libav"
+        )
+
+    required_elements = ("v4l2src", "videorate", "videoconvert", "videoscale", "x264enc", "h264parse", "rtspclientsink")
+    missing = [name for name in required_elements if not gst_element_available(name)]
     if missing:
         raise RuntimeError(
-            "未找到已验证可用的新相机栈 /opt/rpi-cam-stack。\n缺少:\n" + "\n".join(missing)
+            "GStreamer 缺少插件: " + ", ".join(missing) +
+            "。请安装 plugins-good/plugins-ugly/libav。"
+        )
+    if not (gst_element_available("avdec_mjpeg") or gst_element_available("jpegdec")):
+        raise RuntimeError("GStreamer 缺少 MJPEG 解码器 avdec_mjpeg/jpegdec")
+
+    device = Path(USB_CAMERA_DEVICE)
+    if not device.exists():
+        raise RuntimeError(
+            f"未找到 USB 摄像头设备 {USB_CAMERA_DEVICE}。"
+            "请用 v4l2-ctl --list-devices 确认设备节点，并设置 USB_CAMERA_DEVICE。"
+        )
+
+    if not os.access(str(device), os.R_OK | os.W_OK):
+        raise RuntimeError(
+            f"当前用户无权访问 {USB_CAMERA_DEVICE}。"
+            "请把用户加入 video 组：sudo usermod -aG video $USER，然后重新登录。"
         )
 
 
@@ -4449,53 +4527,101 @@ def publisher_is_running():
 
 def build_publisher_env():
     require_camera_stack()
-
-    env = {
-        "PATH": f"{CAMERA_STACK_ROOT / 'bin'}:/usr/bin:/bin",
-        "HOME": os.environ.get("HOME", str(BASE_DIR)),
-        "LANG": os.environ.get("LANG", "C.UTF-8"),
-        "LD_LIBRARY_PATH": f"{CAMERA_LIB_DIR}:/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu",
-        "LIBCAMERA_IPA_MODULE_PATH": str(CAMERA_IPA_MODULE_DIR),
-        "LIBCAMERA_IPA_PROXY_PATH": str(CAMERA_IPA_PROXY_DIR),
-    }
+    env = os.environ.copy()
+    env.setdefault("HOME", str(BASE_DIR))
+    env.setdefault("LANG", "C.UTF-8")
     return env
 
 
+def configure_usb_camera_controls():
+    """尽力开启 UVC 连续自动对焦；驱动不支持时不阻止视频启动。"""
+    if not USB_AUTOFOCUS:
+        return
+
+    v4l2_ctl = shutil.which("v4l2-ctl")
+    if not v4l2_ctl:
+        print("[WARN] v4l2-ctl 未安装，跳过 USB 摄像头自动对焦设置")
+        return
+
+    candidates = [
+        "focus_automatic_continuous=1",
+        "focus_auto=1",
+    ]
+    for control in candidates:
+        result = subprocess.run(
+            [v4l2_ctl, "-d", USB_CAMERA_DEVICE, "--set-ctrl", control],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if result.returncode == 0:
+            print(f"[INFO] USB autofocus enabled: {control}")
+            return
+
+    print("[WARN] 摄像头驱动未暴露可识别的自动对焦控制，保持设备当前设置")
+
+
 def build_publisher_command(width, height, fps, bitrate):
-    width = int(width)
-    height = int(height)
+    """
+    4K MJPG UVC -> GStreamer 解码一次 -> 缩放一次 -> H.264 -> MediaMTX。
+
+    关键点：
+    - 全链路不把 4K BGR 帧送入 Python/OpenCV；
+    - V4L2 使用 mmap；
+    - 每个阶段只保留 1~2 帧，来不及时丢弃旧帧，避免延迟不断累积；
+    - 默认 3200x1800@20；4K 输出限制为 15 FPS；
+    - RTSP publisher 使用 TCP，避免本机发布链路丢包造成花屏。
+    """
+    width = int(width) - int(width) % 2
+    height = int(height) - int(height) % 2
     fps = int(fps)
     bitrate = int(bitrate)
 
-    left = [
-        str(CAMERA_BIN),
-        "-n",
-        "--width", str(width),
-        "--height", str(height),
-        "--framerate", str(fps),
-        "--codec", "libav",
-        "--libav-video-codec", "libx264",
-        "--profile", "baseline",
-        "--low-latency",
-        "--libav-video-codec-opts", "bf=0;preset=ultrafast;tune=zerolatency",
-        "--libav-format", "h264",
-        "--bitrate", str(bitrate),
-        "-t", "0",
-        "-o", "-",
-    ]
+    max_fps = int(MAX_FPS_BY_RESOLUTION.get((width, height), 30))
+    if fps > max_fps:
+        raise ValueError(f"{width}x{height} 最高支持 {max_fps} FPS")
 
-    right = [
-        "gst-launch-1.0", "-q",
-        "fdsrc", "fd=0", "do-timestamp=true", "!",
-        "h264parse", "config-interval=-1", "!",
-        "video/x-h264,stream-format=byte-stream,alignment=au", "!",
-        "rtspclientsink",
-        "location=rtsp://127.0.0.1:8554/cam",
-        "protocols=tcp",
-        "latency=0",
-    ]
+    gst_launch = find_gst_launch_bin()
+    if not gst_launch:
+        raise RuntimeError("未找到 gst-launch-1.0")
 
-    return f"{shlex.join(left)} | {shlex.join(right)}"
+    # 摄像头始终按已经验证稳定的 4K30 MJPG 模式采集。videorate 只丢弃旧帧，
+    # 不补帧；这样 20/15 FPS 输出不依赖摄像头是否单独暴露 20/15 FPS 媒体类型。
+    capture_fps = USB_CAPTURE_FPS
+    bitrate_kbps = max(500, int(round(bitrate / 1000.0)))
+    gop = max(1, fps)
+
+    if gst_element_available("avdec_mjpeg"):
+        decoder = f"avdec_mjpeg max-threads={max(1, USB_X264_THREADS)}"
+    else:
+        decoder = "jpegdec"
+
+    pipeline = (
+        f"{shlex.quote(gst_launch)} -e -q "
+        f"v4l2src device={shlex.quote(USB_CAMERA_DEVICE)} io-mode=mmap do-timestamp=true ! "
+        f"image/jpeg,width={USB_CAPTURE_WIDTH},height={USB_CAPTURE_HEIGHT},framerate={capture_fps}/1 ! "
+        f"queue max-size-buffers={USB_INPUT_QUEUE_SIZE} max-size-bytes=0 max-size-time=0 leaky=downstream ! "
+        f"{decoder} ! "
+        "queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 leaky=downstream ! "
+        "videorate drop-only=true ! "
+        f"video/x-raw,framerate={fps}/1 ! "
+        "queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! "
+        "videoconvert n-threads=2 ! "
+        "videoscale n-threads=2 method=bilinear ! "
+        f"video/x-raw,format=I420,width={width},height={height},framerate={fps}/1 ! "
+        "queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! "
+        f"x264enc tune=zerolatency speed-preset=ultrafast bitrate={bitrate_kbps} "
+        f"key-int-max={gop} bframes=0 byte-stream=true aud=true threads={USB_X264_THREADS} "
+        "sliced-threads=true sync-lookahead=0 rc-lookahead=0 ! "
+        "video/x-h264,profile=baseline,stream-format=byte-stream,alignment=au ! "
+        "h264parse config-interval=-1 ! "
+        "queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 leaky=downstream ! "
+        "rtspclientsink location=rtsp://127.0.0.1:8554/cam protocols=tcp latency=0 "
+        "do-rtsp-keep-alive=true"
+    )
+    return pipeline
 
 
 def start_publisher(width, height, fps, bitrate):
@@ -4509,12 +4635,13 @@ def start_publisher(width, height, fps, bitrate):
             raise RuntimeError("MediaMTX 未运行，无法启动 publisher")
 
         env = build_publisher_env()
+        configure_usb_camera_controls()
         cmdline = build_publisher_command(width, height, fps, bitrate)
 
         if publisher_log_fp is None or publisher_log_fp.closed:
             publisher_log_fp = open(PUBLISHER_LOG_PATH, "ab", buffering=0)
 
-        banner = f"\n\n===== START RPICAM PIPELINE =====\n{cmdline}\n"
+        banner = f"\n\n===== START USB 4K MJPG GSTREAMER PIPELINE =====\n{cmdline}\n"
         publisher_log_fp.write(banner.encode("utf-8", errors="ignore"))
 
         publisher_process = subprocess.Popen(
@@ -6537,6 +6664,9 @@ def apply_video_config(width, height, fps):
         raise ValueError("不支持的分辨率")
     if not is_supported_fps(fps):
         raise ValueError("不支持的 FPS")
+    max_fps = int(MAX_FPS_BY_RESOLUTION.get((width, height), 30))
+    if fps > max_fps:
+        raise ValueError(f"{width}x{height} 最高支持 {max_fps} FPS")
 
     bitrate = get_bitrate(width, height)
 
@@ -6985,13 +7115,20 @@ def api_status():
         "ok": True,
         "cpu_temp": get_cpu_temp(),
         "ip": ip,
-        "stream_mode": "WebRTC / H.264 (rpicam-vid + MediaMTX)",
+        "stream_mode": "WebRTC / H.264 (4K USB MJPG + GStreamer + MediaMTX)",
         "stream_ok": stream_ok,
         "stream_error": stream_error,
         "access_url": f"http://{ip}:{PORT}",
         "resolution": cfg["resolution"],
         "fps": cfg["fps"],
         "bitrate": cfg["bitrate"],
+        "camera_source": "usb-uvc",
+        "camera_device": USB_CAMERA_DEVICE,
+        "camera_input_resolution": resolution_to_str(USB_CAPTURE_WIDTH, USB_CAPTURE_HEIGHT),
+        "camera_input_fps": USB_CAPTURE_FPS,
+        "camera_input_format": USB_CAPTURE_FORMAT.upper(),
+        "stream_profile": ("usb-4k15-quality" if cfg["width"] == 3840 else "usb-1800p20-high-clarity" if cfg["width"] == 3200 else "usb-2k30-balanced" if cfg["width"] == 2560 else "usb-1080p30-lowlatency"),
+        "encoder_preset": "gstreamer-x264-ultrafast/zerolatency",
         "recording_ok": recording_is_running(),
         "recording_file": current_recording_file.name if current_recording_file else "",
         "cleaning_on": get_cleaning_state(),
@@ -7060,12 +7197,19 @@ def api_system_status():
         "cpu_temp": get_cpu_temp(),
         "cpu_usage": get_cpu_usage(),
         "mem_usage": get_mem_usage(),
-        "stream_mode": "WebRTC / H.264 (rpicam-vid + MediaMTX)",
+        "stream_mode": "WebRTC / H.264 (4K USB MJPG + GStreamer + MediaMTX)",
         "stream_ok": stream_ok,
         "stream_error": stream_error,
         "resolution": cfg["resolution"],
         "fps": cfg["fps"],
         "bitrate": cfg["bitrate"],
+        "camera_source": "usb-uvc",
+        "camera_device": USB_CAMERA_DEVICE,
+        "camera_input_resolution": resolution_to_str(USB_CAPTURE_WIDTH, USB_CAPTURE_HEIGHT),
+        "camera_input_fps": USB_CAPTURE_FPS,
+        "camera_input_format": USB_CAPTURE_FORMAT.upper(),
+        "stream_profile": ("usb-4k15-quality" if cfg["width"] == 3840 else "usb-1800p20-high-clarity" if cfg["width"] == 3200 else "usb-2k30-balanced" if cfg["width"] == 2560 else "usb-1080p30-lowlatency"),
+        "encoder_preset": "gstreamer-x264-ultrafast/zerolatency",
         "recording_ok": recording_is_running(),
         "recording_file": current_recording_file.name if current_recording_file else "",
         "cleaning_on": get_cleaning_state(),
@@ -7109,7 +7253,13 @@ def api_camera_options():
         "ok": True,
         "current": cfg,
         "resolution_options": [
-            {"label": f"{w}x{h}", "value": f"{w}x{h}", "width": w, "height": h}
+            {
+                "label": f"{w}x{h}",
+                "value": f"{w}x{h}",
+                "width": w,
+                "height": h,
+                "max_fps": int(MAX_FPS_BY_RESOLUTION.get((w, h), 30)),
+            }
             for w, h in RESOLUTION_OPTIONS
         ],
         "fps_options": FPS_OPTIONS,
@@ -8138,6 +8288,7 @@ if __name__ == "__main__":
     print(f"[INFO] Local access : http://127.0.0.1:{PORT}")
     print(f"[INFO] LAN access   : http://{get_ip_address()}:{PORT}")
     print(f"[INFO] G1 control   : {G1_CAMERA_IP}:{G1_CONTROL_PORT}")
+    print(f"[INFO] USB camera   : {USB_CAMERA_DEVICE} {USB_CAPTURE_WIDTH}x{USB_CAPTURE_HEIGHT}@{USB_CAPTURE_FPS} {USB_CAPTURE_FORMAT.upper()}")
     print("[INFO] WebRTC candidate hosts: " + ", ".join(get_webrtc_advertised_hosts()))
 
     try:

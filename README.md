@@ -1,14 +1,16 @@
-# GIS 管内壁爬行机器人控制端（v1.2.0）
+# GIS 管内壁爬行机器人控制端（v1.3.0）
 
 本目录是运行在树莓派上的机器人上位控制程序。系统通过浏览器提供低延迟视频、底盘运动、自动避障、线阵激光测距、异物识别与清理、G1 云台、拍照录像和安全关机等功能。
 
 > 本项目会直接驱动电机、风机和云台。首次部署必须在机器人悬空、清理风机卸除叶片或断开动力电源的条件下完成联调。确认停止、断网和程序退出时均能可靠停机后，再进入 GIS 管道测试。
 
-## v1.2.0 集成内容
+## v1.3.0 集成内容
 
-- 以 `v1.1.0` 为主线，完整保留 G1 默认模式 watchdog、TCP 响应校验、进程锁和相关状态/API 改动。
-- 合入 YDLIDAR GS2 串口服务、官方波特率自动探测、`/api/lidar/status` 和退出清理流程。
-- 前端增加完整 100° 雷达扇形图；视频下方采用左侧雷达、右侧六按钮 `3 x 2` 布局，去除额外雷达读数栏。
+- 以 `v1.2.0` 正式版为主线，完整保留 G1 默认模式 watchdog、线阵雷达、自动避障及其清理流程。
+- 视频源升级为 UVC 4K USB 摄像头：默认以 `3840x2160@30 MJPEG` 采集，经 GStreamer 解码、缩放和 x264 低延迟编码后发布到 MediaMTX。
+- 默认浏览器输出为 `3200x1800@20`；同时提供 `720p`、`1080p`、`1440p` 和 `4K@15` 档位。
+- 前端明确显示“4K USB 摄像头实时画面”，并保留 `v1.2.0` 的完整雷达扇形图及六按钮 `3 x 2` 布局。
+- 本版本不包含摄像头或 G1 云台的目标自动跟随；云台仍由现有手动控制和默认模式 watchdog 管理。
 - 保持原部署结构，在树莓派上仍只需替换 `app2.py` 和 `templates/index1.html`。
 
 ## 系统组成
@@ -16,8 +18,8 @@
 ```mermaid
 flowchart LR
     Browser["浏览器控制台"] -->|"HTTP :5000 / WHEP"| Flask["Flask app2.py"]
-    PiCam["树莓派摄像头"] --> RpiCam["rpicam-vid"]
-    RpiCam -->|"H.264 / RTSP"| MTX["MediaMTX"]
+    UVC["4K UVC USB 摄像头"] -->|"3840x2160@30 MJPEG"| GST["GStreamer"]
+    GST -->|"缩放 / H.264 / RTSP"| MTX["MediaMTX"]
     MTX -->|"WebRTC"| Browser
     MTX --> Detect["YOLO / OpenCV 识别"]
     Flask -->|"ROS2 topics"| Base["basecontroller"]
@@ -29,7 +31,7 @@ flowchart LR
 
 主要功能：
 
-- 树莓派摄像头 H.264 推流，MediaMTX 提供 WebRTC/WHEP 低延迟预览。
+- 4K UVC USB 摄像头 MJPEG 采集，GStreamer 低延迟转码，MediaMTX 提供 WebRTC/WHEP 预览。
 - 拍照与 MP4 录像，文件保存在树莓派本地并可通过网页下载。
 - YOLOv8 普通检测框和 OBB 旋转框识别，识别框由浏览器 Canvas 叠加。
 - 基于 YOLO 孔洞位置的自动避障：直行、左螺旋、右螺旋。
@@ -44,7 +46,7 @@ flowchart LR
 ## 目录结构
 
 ```text
-v1.2.0/
+v1.3.0/
 ├── app2.py                 # Flask 后端、视频、识别、ROS2、GPIO 和云台控制
 ├── templates/
 │   └── index1.html         # 浏览器控制界面（CSS/JavaScript 均内嵌）
@@ -58,7 +60,7 @@ v1.2.0/
     └── basecontroller.log
 ```
 
-`best.pt`、MediaMTX、`/opt/rpi-cam-stack` 和 ROS2 `basecontroller` 不包含在本目录中，需要单独部署。
+`best.pt`、MediaMTX、GStreamer 系统组件和 ROS2 `basecontroller` 不包含在本目录中，需要单独部署。
 
 ## 运行前必检
 
@@ -78,8 +80,8 @@ def index():
 
 | 设备 | 当前代码约定 |
 | --- | --- |
-| 树莓派 | 64 位 Linux；摄像头运行栈固定在 `/opt/rpi-cam-stack` |
-| 树莓派摄像头 | 由 `/opt/rpi-cam-stack/bin/rpicam-vid` 采集 |
+| 树莓派 | Raspberry Pi 5；64 位 Linux；USB 3 口优先用于 4K 摄像头 |
+| 4K 摄像头 | UVC USB 摄像头；默认设备 `/dev/video0`；原生 `3840x2160@30 MJPEG` |
 | 底盘控制器 | 由外部 ROS2 包 `basecontroller` 连接和控制 |
 | G1 云台 | 默认 IP `172.20.10.8`，TCP 控制端口 `8888` |
 | 线阵激光雷达 | YDLIDAR GS2；通过 CP2102 串口转接板和 Type-C 数据线连接树莓派 USB |
@@ -117,6 +119,19 @@ sudo usermod -aG dialout "$USER"
 
 默认自动搜索 `/dev/serial/by-id/*`、`/dev/ttyUSB*` 和 `/dev/ttyACM*`，并依次探测 `230400`、`512000`、`921600`、`1500000` 波特率。当前实机验证使用 CP2102 的持久设备路径，通信波特率为 `921600`。状态接口为 `/api/lidar/status`。
 
+### 5. 4K USB 摄像头
+
+摄像头必须连接支持 USB 3 数据传输的端口和线缆。运行用户需要访问 V4L2 设备：
+
+```bash
+sudo usermod -aG video "$USER"
+# 注销并重新登录后生效
+v4l2-ctl --list-devices
+v4l2-ctl -d /dev/video0 --list-formats-ext
+```
+
+默认采集固定为 `3840x2160@30 MJPEG`，避免把未压缩 4K 帧通过 USB 传输。GStreamer 只保留少量帧并在处理来不及时丢弃旧帧，以控制延迟。默认输出 `3200x1800@20`；选择 `3840x2160` 时最大允许 `15 FPS`，以限制树莓派 5 的软件编码负载。
+
 ## 软件依赖
 
 ### 操作系统组件
@@ -128,9 +143,10 @@ sudo apt update
 sudo apt install -y \
   python3-venv python3-pip python3-opencv python3-numpy \
   python3-psutil python3-gpiozero \
-  ffmpeg iproute2 procps \
+  ffmpeg iproute2 procps v4l-utils \
   gstreamer1.0-tools gstreamer1.0-plugins-base \
-  gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
+  gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly gstreamer1.0-libav
 ```
 
 GPIO 后端按系统选择安装。Raspberry Pi OS Bookworm 通常使用 `python3-lgpio`；其他系统可使用与 `gpiozero` 兼容的 `lgpio` 或 `RPi.GPIO`。运行用户还需要 GPIO 访问权限。
@@ -140,7 +156,7 @@ GPIO 后端按系统选择安装。Raspberry Pi OS Bookworm 通常使用 `python
 ROS2 的 `rclpy` 通常由系统包提供，因此虚拟环境应保留系统包：
 
 ```bash
-cd "/path/to/v1.2.0"
+cd "/path/to/v1.3.0"
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -174,8 +190,8 @@ python -c "import rclpy; from geometry_msgs.msg import Twist; from std_msgs.msg 
 
 1. 环境变量 `MEDIAMTX_BIN`。
 2. 系统 `PATH` 中的 `mediamtx`。
-3. `v1.2.0/bin/mediamtx`。
-4. `v1.2.0/mediamtx`。
+3. `v1.3.0/bin/mediamtx`。
+4. `v1.3.0/mediamtx`。
 5. `/usr/local/bin/mediamtx` 或 `/usr/bin/mediamtx`。
 
 推荐将已验证版本的 ARM64 可执行文件放在 `bin/mediamtx`，并赋予执行权限：
@@ -188,22 +204,21 @@ install -m 0755 /path/to/mediamtx bin/mediamtx
 
 当前配置需要 MediaMTX 支持 WebRTC/WHEP，以及 `webrtcIPsFromInterfaces`、`webrtcLocalUDPAddress`、`webrtcLocalTCPAddress` 和 `webrtcICEServers2` 等配置项。升级 MediaMTX 后应先在台架环境验证配置兼容性。
 
-### 树莓派摄像头运行栈
+### 4K USB 摄像头与 GStreamer
 
-视频发布器使用硬编码路径 `/opt/rpi-cam-stack`，且需要 `rpicam-vid` 支持 `libav`、`libx264` 和低延迟参数。仅在 `PATH` 中安装另一个 `rpicam-vid` 不会被本程序采用。
-
-部署后检查：
+视频发布器通过 V4L2 读取 UVC 摄像头，并调用系统 `gst-launch-1.0`。启动前检查设备格式和所需插件：
 
 ```bash
-test -x /opt/rpi-cam-stack/bin/rpicam-vid
-env \
-  LD_LIBRARY_PATH=/opt/rpi-cam-stack/lib/aarch64-linux-gnu \
-  LIBCAMERA_IPA_MODULE_PATH=/opt/rpi-cam-stack/lib/aarch64-linux-gnu/libcamera/ipa \
-  LIBCAMERA_IPA_PROXY_PATH=/opt/rpi-cam-stack/libexec/libcamera \
-  /opt/rpi-cam-stack/bin/rpicam-vid --list-cameras
+v4l2-ctl --list-devices
+v4l2-ctl -d /dev/video0 --list-formats-ext
+gst-inspect-1.0 v4l2src
+gst-inspect-1.0 avdec_mjpeg
+gst-inspect-1.0 x264enc
 gst-inspect-1.0 h264parse
 gst-inspect-1.0 rtspclientsink
 ```
+
+设备列表中必须包含 `3840x2160`、`MJPG` 和 `30 fps`。如果摄像头节点不是 `/dev/video0`，通过 `USB_CAMERA_DEVICE` 指定正确节点。程序会尝试开启 UVC 连续自动对焦；设备不支持对应控制项时只记录警告，不会阻止推流。
 
 ### YOLO 权重
 
@@ -274,7 +289,16 @@ ros2 run basecontroller basecontroller
 | `MEDIAMTX_BIN` | 自动查找 | MediaMTX 可执行文件路径 |
 | `MEDIAMTX_LOG_LEVEL` | `info` | `error`、`warn`、`info` 或 `debug` |
 | `FFMPEG_BIN` | 自动查找 | FFmpeg 可执行文件路径 |
+| `GST_LAUNCH_BIN` | 自动查找 | `gst-launch-1.0` 可执行文件路径 |
 | `WEBRTC_NETWORK_WATCH_INTERVAL_SECONDS` | `5` | 网卡地址变化检查周期，最小 3 秒 |
+| `USB_CAMERA_DEVICE` | `/dev/video0` | UVC 摄像头 V4L2 设备节点 |
+| `USB_CAPTURE_WIDTH` | `3840` | 摄像头 MJPEG 输入宽度 |
+| `USB_CAPTURE_HEIGHT` | `2160` | 摄像头 MJPEG 输入高度 |
+| `USB_CAPTURE_FPS` | `30` | 摄像头输入帧率 |
+| `USB_CAPTURE_FORMAT` | `mjpeg` | 当前管线仅接受 `mjpeg`/`mjpg`，其他值会回退为 `mjpeg` |
+| `USB_INPUT_QUEUE_SIZE` | `4` | MJPEG 输入阶段最多保留的帧数，范围 2~32 |
+| `USB_X264_THREADS` | `4` | x264 编码线程数，范围 1~8 |
+| `USB_AUTOFOCUS` | `1` | 是否尝试启用 UVC 连续自动对焦 |
 | `G1_CAMERA_IP` | `172.20.10.8` | G1 云台 IP |
 | `G1_CONTROL_PORT` | `8888` | G1 TCP 控制端口 |
 | `G1_CONNECT_TIMEOUT` | `2.0` | TCP 连接超时，秒 |
@@ -319,7 +343,7 @@ OpenCV 小异物识别还支持 `FOREIGN_DETECTION_MIN_AREA`、`FOREIGN_DETECTIO
 ## 启动
 
 ```bash
-cd "/path/to/v1.2.0"
+cd "/path/to/v1.3.0"
 source /opt/ros/<ros-distro>/setup.bash
 source /path/to/robot_ws/install/setup.bash
 source .venv/bin/activate
@@ -339,10 +363,11 @@ http://<树莓派IP>:5000
 
 程序启动时会依次尝试初始化 GPIO 清理风机、网络地址监测、G1 默认模式 watchdog、MediaMTX/摄像头推流、YOLO 识别线程、ROS2 节点和线阵雷达。部分组件失败时 Flask 仍可能继续运行，应查看启动输出、`/api/logs` 和 `/api/lidar/status`，不能仅以网页能打开作为整机就绪依据。
 
-默认视频参数为 `1280x720 @ 15 FPS`。界面/API 支持：
+摄像头输入默认为 `3840x2160 @ 30 FPS MJPEG`，浏览器输出默认为 `3200x1800 @ 20 FPS H.264`。界面/API 支持：
 
-- 分辨率：`640x360`、`1280x720`、`1920x1080`。
-- 帧率：`15`、`24`、`30`、`45`、`60` FPS。
+- 分辨率：`1280x720`、`1920x1080`、`2560x1440`、`3200x1800`、`3840x2160`。
+- 帧率：`15`、`20`、`24`、`30` FPS。
+- `3200x1800` 最大 `20 FPS`；`3840x2160` 最大 `15 FPS`。
 
 录像期间不能切换分辨率、帧率或重启推流。
 
@@ -363,8 +388,11 @@ http://<树莓派IP>:5000
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `GET` | `/api/status` | 汇总视频、识别、云台、底盘和风机状态 |
+| `GET` | `/api/status` | 汇总 4K 视频、识别、雷达、云台、底盘和风机状态 |
 | `GET` | `/api/system_status` | 系统资源与主要设备状态 |
+| `GET` | `/api/lidar/status` | 线阵雷达串口、帧率和测距点状态 |
+| `GET` | `/api/camera_options` | 获取视频输出分辨率、FPS 及各档上限 |
+| `POST` | `/api/camera_config` | 切换输出分辨率和 FPS；录像期间不可切换 |
 | `GET` | `/api/logs` | 读取四类运行日志尾部 |
 | `POST` | `/api/robot_start`、`/api/robot_stop` | 启停 `basecontroller` |
 | `POST` | `/api/set_speed` | 设置线速度，如 `{"speed": 0.1}` |
@@ -400,6 +428,8 @@ http://<树莓派IP>:5000
 
 ```bash
 curl -s http://127.0.0.1:5000/api/status
+curl -s http://127.0.0.1:5000/api/lidar/status
+curl -s http://127.0.0.1:5000/api/camera_options
 curl -s http://127.0.0.1:5000/api/logs
 ```
 
@@ -416,12 +446,18 @@ curl -s http://127.0.0.1:5000/api/logs
 依次检查：
 
 ```bash
-test -x /opt/rpi-cam-stack/bin/rpicam-vid
+v4l2-ctl --list-devices
+v4l2-ctl -d /dev/video0 --list-formats-ext
+gst-inspect-1.0 v4l2src
+gst-inspect-1.0 avdec_mjpeg
+gst-inspect-1.0 x264enc
 test -x ./bin/mediamtx
 gst-inspect-1.0 h264parse
 gst-inspect-1.0 rtspclientsink
 curl -s http://127.0.0.1:5000/api/logs
 ```
+
+确认用户属于 `video` 组，Type-C 线和 USB 口支持 USB 3 数据传输，且 `USB_CAMERA_DEVICE` 指向实际的 V4L2 节点。若 `3840x2160@30 MJPEG` 不在设备能力列表中，不要强行设置 4K 输入；先选择摄像头实际支持的模式并同步调整 `USB_CAPTURE_WIDTH`、`USB_CAPTURE_HEIGHT` 和 `USB_CAPTURE_FPS`。
 
 确认浏览器能访问树莓派的 `5000/tcp`、`8889/tcp`、`8189/udp` 和 `8190/tcp`。树莓派切换 Wi-Fi/IP 时程序会自动重启 MediaMTX 和 publisher；若正在录像，会等录像结束后再切换。
 
