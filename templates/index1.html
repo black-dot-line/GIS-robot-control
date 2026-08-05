@@ -248,11 +248,13 @@
     }
 
     .button-row {
+      min-width: 0;
+      min-height: 0;
       display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-rows: repeat(2, minmax(0, 1fr));
       gap: 8px;
-      margin-top: 10px;
-      flex: 0 0 auto;
+      align-self: stretch;
     }
 
     .feature-btn {
@@ -2254,6 +2256,184 @@
       }
     }
 
+    /* 视频下方工作区：雷达在左、六个高频操作按钮在右。 */
+    .lower-workspace {
+      flex: 0 0 clamp(220px, 27vh, 270px);
+      min-height: 220px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.09);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) clamp(260px, 28%, 360px);
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    .lower-workspace > .button-row {
+      height: calc(100% - 38px);
+      margin-top: 38px;
+    }
+
+    .lower-workspace .feature-btn {
+      width: 100%;
+      height: 100%;
+      min-height: 48px;
+      padding: 6px;
+      line-height: 1.2;
+    }
+
+    .lidar-monitor {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .lidar-monitor-header {
+      flex: 0 0 30px;
+      min-height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    .lidar-heading {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .lidar-heading strong {
+      flex: 0 0 auto;
+      color: #f2f7f5;
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .lidar-status-dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: #6e7b82;
+      box-shadow: 0 0 0 3px rgba(110,123,130,0.12);
+    }
+
+    .lidar-status-dot.online {
+      background: var(--green);
+      box-shadow: 0 0 0 3px rgba(0,230,138,0.12), 0 0 10px rgba(0,230,138,0.45);
+    }
+
+    .lidar-status-dot.warning {
+      background: #f6b73c;
+      box-shadow: 0 0 0 3px rgba(246,183,60,0.13);
+    }
+
+    .lidar-status-dot.error {
+      background: #ef5b5b;
+      box-shadow: 0 0 0 3px rgba(239,91,91,0.13);
+    }
+
+    .lidar-link-state {
+      min-width: 0;
+      color: #8fa2ad;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .lidar-monitor-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+    }
+
+    .lidar-scan-wrap {
+      flex: 1 1 auto;
+      position: relative;
+      width: 100%;
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid rgba(109,139,153,0.22);
+      background:
+        linear-gradient(rgba(93,121,135,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(93,121,135,0.035) 1px, transparent 1px),
+        #070c11;
+      background-size: 18px 18px;
+      overflow: hidden;
+    }
+
+    .lidar-scan-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    @media (min-width: 721px) and (max-height: 820px) {
+      .lower-workspace {
+        flex-basis: 190px;
+        min-height: 190px;
+      }
+
+      .lidar-monitor-header {
+        flex-basis: 24px;
+        min-height: 24px;
+      }
+
+      .lower-workspace > .button-row {
+        height: calc(100% - 32px);
+        margin-top: 32px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      body {
+        overflow-y: auto;
+      }
+
+      .stream-status {
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        max-width: none;
+      }
+
+      .datetime {
+        top: 48px;
+        right: 10px;
+      }
+
+      .page {
+        height: auto;
+        min-height: calc(100vh - 8px);
+        overflow: visible;
+      }
+
+      .layout,
+      .left-col,
+      .right-col {
+        overflow: visible !important;
+      }
+
+      .lower-workspace {
+        flex-basis: auto;
+        min-height: 500px;
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(300px, 42vh) 180px;
+        overflow: visible;
+      }
+
+      .lower-workspace > .button-row {
+        height: 180px;
+        margin-top: 0;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+      }
+    }
+
 
   </style>
 </head>
@@ -2310,13 +2490,47 @@
               </button>
             </div>
 
-            <div class="button-row">
-              <button id="photoBtn" class="feature-btn primary" onclick="capturePhoto()">拍照</button>
-              <button id="recordBtn" class="feature-btn primary" onclick="toggleRecording()">开始录制</button>
-              <button id="detectionBtn" class="feature-btn primary" onclick="toggleDetection()">异物识别</button>
-              <button id="cleaningBtn" class="feature-btn primary" onclick="toggleCleaning()">异物清理</button>
-              <button id="avoidanceBtn" class="feature-btn primary" title="仅自动模式可用" onclick="toggleObstacleAvoidance()" disabled>自动避障</button>
-              <button id="modeToggleBtn" class="feature-btn mode-toggle-btn" onclick="toggleControlMode()">手控模式</button>
+            <div class="lower-workspace">
+              <div class="lidar-monitor" id="lidarMonitor">
+                <div class="lidar-monitor-header">
+                  <div class="lidar-heading">
+                    <span id="lidarStatusDot" class="lidar-status-dot" aria-hidden="true"></span>
+                    <strong>线阵激光雷达</strong>
+                    <span id="lidarLinkState" class="lidar-link-state">等待串口...</span>
+                  </div>
+                </div>
+
+                <div class="lidar-monitor-body">
+                  <div class="lidar-scan-wrap" id="lidarScanWrap">
+                    <canvas
+                      id="lidarCanvas"
+                      class="lidar-scan-canvas"
+                      role="img"
+                      aria-label="线阵激光雷达一百度视场测距图"
+                    ></canvas>
+                  </div>
+                </div>
+
+                <!-- 保留旧状态节点供兼容脚本/测试使用，但不在界面呈现读数。 -->
+                <div class="lidar-compat-readouts" hidden aria-hidden="true">
+                  <span id="lidarNearestValue"></span>
+                  <span id="lidarRiskLabel"></span>
+                  <span id="lidarDirection"></span>
+                  <span id="lidarPort"></span>
+                  <span id="lidarPointCount"></span>
+                  <span id="lidarFrameRate"></span>
+                  <span id="lidarFrameAge"></span>
+                </div>
+              </div>
+
+              <div class="button-row">
+                <button id="photoBtn" class="feature-btn primary" onclick="capturePhoto()">拍照</button>
+                <button id="recordBtn" class="feature-btn primary" onclick="toggleRecording()">开始录制</button>
+                <button id="detectionBtn" class="feature-btn primary" onclick="toggleDetection()">异物识别</button>
+                <button id="cleaningBtn" class="feature-btn primary" onclick="toggleCleaning()">异物清理</button>
+                <button id="avoidanceBtn" class="feature-btn primary" title="仅自动模式可用" onclick="toggleObstacleAvoidance()" disabled>自动避障</button>
+                <button id="modeToggleBtn" class="feature-btn mode-toggle-btn" onclick="toggleControlMode()">手控模式</button>
+              </div>
             </div>
           </div>
         </section>
@@ -2583,6 +2797,12 @@
     const detectionCanvas = document.getElementById("detectionCanvas");
     const detectionCtx = detectionCanvas.getContext("2d");
 
+    const lidarCanvas = document.getElementById("lidarCanvas");
+    const lidarCtx = lidarCanvas.getContext("2d");
+    const lidarScanWrap = document.getElementById("lidarScanWrap");
+    const lidarStatusDot = document.getElementById("lidarStatusDot");
+    const lidarLinkState = document.getElementById("lidarLinkState");
+
     const photoBtn = document.getElementById("photoBtn");
     const recordBtn = document.getElementById("recordBtn");
     const detectionBtn = document.getElementById("detectionBtn");
@@ -2666,6 +2886,8 @@
     let movementRequestChain = Promise.resolve();
 
     let statusTimer = null;
+    let lidarTimer = null;
+    let latestLidarData = null;
 
     // 原生 WHEP + <video>，可以直接读取 RTCPeerConnection.getStats()。
     let lastStreamGeneration = null;
@@ -4886,6 +5108,248 @@
       }
     }
 
+    function resizeLidarCanvas() {
+      const rect = lidarScanWrap.getBoundingClientRect();
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const width = Math.max(1, Math.round(rect.width * dpr));
+      const height = Math.max(1, Math.round(rect.height * dpr));
+
+      if (lidarCanvas.width !== width || lidarCanvas.height !== height) {
+        lidarCanvas.width = width;
+        lidarCanvas.height = height;
+        lidarCanvas.style.width = `${rect.width}px`;
+        lidarCanvas.style.height = `${rect.height}px`;
+      }
+      lidarCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return { width: rect.width, height: rect.height };
+    }
+
+    function drawLidarScan(data = latestLidarData) {
+      const size = resizeLidarCanvas();
+      const width = Math.max(1, size.width);
+      const height = Math.max(1, size.height);
+      const ctx = lidarCtx;
+      ctx.clearRect(0, 0, width, height);
+
+      const fov = Math.max(1, Math.min(180, Number(data?.fov_degrees || 100)));
+      const halfFov = fov / 2;
+      const halfRad = halfFov * Math.PI / 180;
+      const maxRange = Math.max(1, Number(data?.max_range_mm || 300));
+      const warningRange = Math.max(1, Number(data?.warning_mm || 150));
+      const criticalRange = Math.max(1, Number(data?.critical_mm || 80));
+      const originX = width / 2;
+      const originY = height - 14;
+      const sideLimit = (width - 56) / Math.max(0.2, 2 * Math.sin(halfRad));
+      // 外弧的最高点在 0° 中线上，顶部边界必须直接约束半径。
+      const topLimit = originY - 30;
+      const radius = Math.max(24, Math.min(sideLimit, topLimit));
+
+      const fanStart = -Math.PI / 2 - halfRad;
+      const fanEnd = -Math.PI / 2 + halfRad;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(originX, originY);
+      ctx.arc(originX, originY, radius, fanStart, fanEnd);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(56, 91, 108, 0.10)";
+      ctx.fill();
+
+      const ringValues = [criticalRange, warningRange, maxRange];
+      const ringColors = [
+        "rgba(239,91,91,0.46)",
+        "rgba(246,183,60,0.40)",
+        "rgba(134,162,175,0.34)"
+      ];
+
+      ringValues.forEach((distance, index) => {
+        const ringRadius = Math.min(radius, radius * distance / maxRange);
+        ctx.beginPath();
+        ctx.arc(originX, originY, ringRadius, fanStart, fanEnd);
+        ctx.strokeStyle = ringColors[index];
+        ctx.lineWidth = index === ringValues.length - 1 ? 1.2 : 1;
+        ctx.setLineDash(index === ringValues.length - 1 ? [] : [3, 4]);
+        ctx.stroke();
+
+        const labelX = originX + 4;
+        const labelY = originY - ringRadius + 11;
+        ctx.fillStyle = ringColors[index];
+        ctx.font = "9px Consolas, monospace";
+        ctx.fillText(`${Math.round(distance)}mm`, labelX, labelY);
+      });
+      ctx.setLineDash([]);
+
+      [-halfFov, -halfFov / 2, 0, halfFov / 2, halfFov].forEach((angle) => {
+        const radians = angle * Math.PI / 180;
+        const x = originX + Math.sin(radians) * radius;
+        const y = originY - Math.cos(radians) * radius;
+        ctx.beginPath();
+        ctx.moveTo(originX, originY);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = angle === 0
+          ? "rgba(87,181,255,0.40)"
+          : "rgba(114,142,156,0.20)";
+        ctx.lineWidth = angle === 0 ? 1.2 : 1;
+        ctx.stroke();
+      });
+
+      ctx.fillStyle = "rgba(162,181,190,0.70)";
+      ctx.font = "9px Consolas, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(`-${Math.round(halfFov)}°`, originX - Math.sin(halfRad) * radius, originY - Math.cos(halfRad) * radius - 5);
+      ctx.fillText("0°", originX, Math.max(10, originY - radius - 5));
+      ctx.fillText(`+${Math.round(halfFov)}°`, originX + Math.sin(halfRad) * radius, originY - Math.cos(halfRad) * radius - 5);
+
+      const points = Array.isArray(data?.points)
+        ? data.points
+            .map((point) => ({
+              angle: Number(point.angle_deg),
+              distance: Number(point.distance_mm)
+            }))
+            .filter((point) => Number.isFinite(point.angle) && Number.isFinite(point.distance))
+            .sort((a, b) => a.angle - b.angle)
+        : [];
+
+      const riskColor = {
+        clear: "#16dfa0",
+        warning: "#f6b73c",
+        critical: "#ef5b5b"
+      }[String(data?.risk || "")] || "#7f949e";
+
+      if (points.length) {
+        const plotted = points.map((point) => {
+          const pointRadius = Math.max(0, Math.min(radius, radius * point.distance / maxRange));
+          const radians = point.angle * Math.PI / 180;
+          return {
+            x: originX + Math.sin(radians) * pointRadius,
+            y: originY - Math.cos(radians) * pointRadius,
+            source: point
+          };
+        });
+
+        ctx.beginPath();
+        ctx.moveTo(originX, originY);
+        plotted.forEach((point) => ctx.lineTo(point.x, point.y));
+        ctx.closePath();
+        ctx.fillStyle = riskColor === "#16dfa0"
+          ? "rgba(22,223,160,0.12)"
+          : riskColor === "#f6b73c"
+          ? "rgba(246,183,60,0.13)"
+          : "rgba(239,91,91,0.14)";
+        ctx.fill();
+
+        ctx.beginPath();
+        plotted.forEach((point, index) => {
+          if (index === 0) ctx.moveTo(point.x, point.y);
+          else ctx.lineTo(point.x, point.y);
+        });
+        ctx.strokeStyle = riskColor;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+
+        plotted.forEach((point) => {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = "#d6fff0";
+          ctx.fill();
+        });
+
+        const nearest = data?.nearest;
+        if (nearest) {
+          const nearestDistance = Number(nearest.distance_mm);
+          const nearestAngle = Number(nearest.angle_deg);
+          if (Number.isFinite(nearestDistance) && Number.isFinite(nearestAngle)) {
+            const nearestRadius = Math.max(0, Math.min(radius, radius * nearestDistance / maxRange));
+            const nearestRadians = nearestAngle * Math.PI / 180;
+            const x = originX + Math.sin(nearestRadians) * nearestRadius;
+            const y = originY - Math.cos(nearestRadians) * nearestRadius;
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        }
+      }
+
+      ctx.beginPath();
+      ctx.arc(originX, originY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = "#57b5ff";
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function updateLidarUI(data) {
+      if (!data || typeof data !== "object") return;
+      latestLidarData = data;
+
+      const status = String(data.status || "stopped");
+      const statusLabels = {
+        connected: "USB 串口在线",
+        simulated: "模拟测距",
+        stale: "串口在线 · 数据超时",
+        connecting: "正在搜索 USB 串口",
+        error: "串口异常",
+        stopped: "雷达服务未启动",
+        disabled: "雷达已停用"
+      };
+      const statusClass = status === "connected" || status === "simulated"
+        ? "online"
+        : status === "stale" || status === "connecting"
+        ? "warning"
+        : status === "error"
+        ? "error"
+        : "";
+      lidarStatusDot.className = `lidar-status-dot ${statusClass}`.trim();
+      lidarLinkState.textContent = statusLabels[status] || status;
+      lidarLinkState.title = data.last_error || data.raw_preview || "";
+
+      drawLidarScan(data);
+    }
+
+    let lidarRequestInFlight = false;
+
+    async function loadLidarStatus() {
+      if (lidarRequestInFlight) return;
+      lidarRequestInFlight = true;
+      try {
+        const response = await fetch("/api/lidar/status", { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.message || `HTTP ${response.status}`);
+        }
+        updateLidarUI(data);
+      } catch (error) {
+        updateLidarUI({
+          status: "error",
+          connected: false,
+          data_valid: false,
+          stale: true,
+          points: [],
+          point_count: 0,
+          last_error: error.message || String(error),
+          fov_degrees: latestLidarData?.fov_degrees || 100,
+          max_range_mm: latestLidarData?.max_range_mm || 300,
+          warning_mm: latestLidarData?.warning_mm || 150,
+          critical_mm: latestLidarData?.critical_mm || 80
+        });
+      } finally {
+        lidarRequestInFlight = false;
+      }
+    }
+
+    function startLidarPolling() {
+      stopLidarPolling();
+      loadLidarStatus();
+      lidarTimer = setInterval(loadLidarStatus, 250);
+    }
+
+    function stopLidarPolling() {
+      if (lidarTimer) {
+        clearInterval(lidarTimer);
+        lidarTimer = null;
+      }
+    }
+
     function updateStreamStatusFromBasic(basic) {
       if (!basic || typeof basic !== "object") return;
 
@@ -4964,6 +5428,10 @@
         const res = await fetch("/api/status", { cache: "no-store" });
         const basic = await res.json();
         handleVideoRecovery(basic);
+
+        if (basic.lidar && typeof basic.lidar === "object") {
+          updateLidarUI(basic.lidar);
+        }
 
         if (basic.gimbal_pose && typeof basic.gimbal_pose === "object") {
           updateGimbalPose(basic.gimbal_pose);
@@ -5161,6 +5629,7 @@
 
     window.addEventListener("resize", () => {
       drawDetectionOverlay(latestDetectionData);
+      drawLidarScan(latestLidarData);
     });
 
     if (window.ResizeObserver) {
@@ -5168,6 +5637,11 @@
         drawDetectionOverlay(latestDetectionData);
       });
       detectionResizeObserver.observe(videoFrameWrap);
+
+      const lidarResizeObserver = new ResizeObserver(() => {
+        drawLidarScan(latestLidarData);
+      });
+      lidarResizeObserver.observe(lidarScanWrap);
     }
 
     window.addEventListener("mouseup", () => {
@@ -5191,6 +5665,7 @@
     window.addEventListener("pagehide", () => {
       sendGimbalStopOnPageExit();
       stopDetectionOverlayPolling();
+      stopLidarPolling();
       closeWhepReader(true).catch(() => {});
       if (videoFallbackFrame) videoFallbackFrame.src = "about:blank";
     });
@@ -5198,6 +5673,7 @@
     window.addEventListener("beforeunload", () => {
       sendGimbalStopOnPageExit();
       stopDetectionOverlayPolling();
+      stopLidarPolling();
       closeWhepReader(true).catch(() => {});
       if (videoFallbackFrame) videoFallbackFrame.src = "about:blank";
     });
@@ -5215,6 +5691,7 @@
       ]);
       startDetectionOverlayPolling();
       startStatusPolling();
+      startLidarPolling();
 
       const bindMoveButton = (btn, direction) => {
         if (!btn) return;
