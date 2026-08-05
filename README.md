@@ -35,7 +35,7 @@ flowchart LR
 ## 目录结构
 
 ```text
-v1.0.1/
+v1.1.0/
 ├── app2.py                 # Flask 后端、视频、识别、ROS2、GPIO 和云台控制
 ├── templates/
 │   └── index1.html         # 浏览器控制界面（CSS/JavaScript 均内嵌）
@@ -85,16 +85,16 @@ def index():
 
 ### 3. G1 云台默认模式
 
-v1.0.1 增加了 G1 默认模式维护机制。默认配置为 `G1_DEFAULT_MODE=3`（全跟随模式），并由后台 watchdog 在启动后低频查询；发现云台模式被改变时，会在没有进行中的云台动作时恢复默认模式，默认检查周期为 15 秒。
+v1.1.0 增加了 G1 默认模式维护机制。默认配置为 `G1_DEFAULT_MODE=3`（全跟随模式），并由后台 watchdog 在启动后低频查询；发现云台模式被改变时，会在没有进行中的云台动作时恢复默认模式，默认检查周期为 15 秒。
 
 - 需要默认锁定模式时设置 `G1_DEFAULT_MODE=0`。
 - 需要完全由人工管理模式时设置 `G1_DEFAULT_MODE_ENABLED=0`。
 - 手动调用 `/api/gimbal/mode` 改成其他模式后，如果 watchdog 仍启用，模式可能在下一次检查时恢复为默认模式。
-- `G1_AUTO_LOCK_MODE` 仅为旧配置名保留，v1.0.1 不再读取其环境变量；请改用上面的两个配置项。
+- `G1_AUTO_LOCK_MODE` 仅为旧配置名保留，v1.1.0 不再读取其环境变量；请改用上面的两个配置项。
 
 模式维护不会执行周期性回中，只在模式查询或恢复时访问 G1；进行中的方向/俯仰/横滚动作会优先完成。程序退出、网页安全关机和清理流程都会停止该 watchdog。
 
-v1.0.1 同时加强了 G1 TCP 协议处理：请求会校验响应命令号并有限度忽略无关响应帧，设置模式后会再次查询确认；多进程部署时使用文件锁串行化 G1 TCP 通信。动作间隔默认缩短为 40 ms，Neutral 和动作完成后的默认等待均为 20 ms，如实机响应不稳定可通过环境变量调大这些值。
+v1.1.0 同时加强了 G1 TCP 协议处理：请求会校验响应命令号并有限度忽略无关响应帧，设置模式后会再次查询确认；多进程部署时使用文件锁串行化 G1 TCP 通信。动作间隔默认缩短为 40 ms，Neutral 和动作完成后的默认等待均为 20 ms，如实机响应不稳定可通过环境变量调大这些值。
 
 ## 软件依赖
 
@@ -119,7 +119,7 @@ GPIO 后端按系统选择安装。Raspberry Pi OS Bookworm 通常使用 `python
 ROS2 的 `rclpy` 通常由系统包提供，因此虚拟环境应保留系统包：
 
 ```bash
-cd "/path/to/v1.0.1"
+cd "/path/to/v1.1.0"
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -153,8 +153,8 @@ python -c "import rclpy; from geometry_msgs.msg import Twist; from std_msgs.msg 
 
 1. 环境变量 `MEDIAMTX_BIN`。
 2. 系统 `PATH` 中的 `mediamtx`。
-3. `v1.0.1/bin/mediamtx`。
-4. `v1.0.1/mediamtx`。
+3. `v1.1.0/bin/mediamtx`。
+4. `v1.1.0/mediamtx`。
 5. `/usr/local/bin/mediamtx` 或 `/usr/bin/mediamtx`。
 
 推荐将已验证版本的 ARM64 可执行文件放在 `bin/mediamtx`，并赋予执行权限：
@@ -268,7 +268,7 @@ ros2 run basecontroller basecontroller
 | `G1_COMMAND_MIN_INTERVAL` | `0.04` | G1 TCP 命令之间的最小间隔，秒 |
 | `G1_NEUTRAL_SETTLE_SECONDS` | `0.02` | 云台动作前 Neutral 的等待时间，秒 |
 | `G1_POST_ACTION_SETTLE_SECONDS` | `0.02` | 云台动作完成后的等待时间，秒 |
-| `G1_AUTO_LOCK_MODE` | 不再读取 | v1.0.0 兼容配置名；v1.0.1 请使用 `G1_DEFAULT_MODE` 和 `G1_DEFAULT_MODE_ENABLED` |
+| `G1_AUTO_LOCK_MODE` | 不再读取 | v1.0.0 兼容配置名；v1.1.0 请使用 `G1_DEFAULT_MODE` 和 `G1_DEFAULT_MODE_ENABLED` |
 | `G1_YAW_DIRECTION` | `1` | 航向方向反向时设为 `-1` |
 | `G1_PITCH_DIRECTION` | `-1` | 俯仰方向反向时改为 `1` |
 | `DETECTION_BACKEND` | `yolov8` | 自动避障要求保持为 `yolov8` |
@@ -289,7 +289,7 @@ OpenCV 小异物识别还支持 `FOREIGN_DETECTION_MIN_AREA`、`FOREIGN_DETECTIO
 ## 启动
 
 ```bash
-cd "/path/to/v1.0.1"
+cd "/path/to/v1.1.0"
 source /opt/ros/<ros-distro>/setup.bash
 source /path/to/robot_ws/install/setup.bash
 source .venv/bin/activate
