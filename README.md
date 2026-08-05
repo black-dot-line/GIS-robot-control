@@ -1,8 +1,15 @@
-# GIS 管内壁爬行机器人控制端（v1.1.0）
+# GIS 管内壁爬行机器人控制端（v1.2.0）
 
-本目录是运行在树莓派上的机器人上位控制程序。系统通过浏览器提供低延迟视频、底盘运动、自动避障、异物识别与清理、G1 云台、拍照录像和安全关机等功能。
+本目录是运行在树莓派上的机器人上位控制程序。系统通过浏览器提供低延迟视频、底盘运动、自动避障、线阵激光测距、异物识别与清理、G1 云台、拍照录像和安全关机等功能。
 
 > 本项目会直接驱动电机、风机和云台。首次部署必须在机器人悬空、清理风机卸除叶片或断开动力电源的条件下完成联调。确认停止、断网和程序退出时均能可靠停机后，再进入 GIS 管道测试。
+
+## v1.2.0 集成内容
+
+- 以 `v1.1.0` 为主线，完整保留 G1 默认模式 watchdog、TCP 响应校验、进程锁和相关状态/API 改动。
+- 合入 YDLIDAR GS2 串口服务、官方波特率自动探测、`/api/lidar/status` 和退出清理流程。
+- 前端增加完整 100° 雷达扇形图；视频下方采用左侧雷达、右侧六按钮 `3 x 2` 布局，去除额外雷达读数栏。
+- 保持原部署结构，在树莓派上仍只需替换 `app2.py` 和 `templates/index1.html`。
 
 ## 系统组成
 
@@ -17,6 +24,7 @@ flowchart LR
     Base --> MCU["底盘控制器 / 电机"]
     Flask -->|"TCP :8888"| G1["G1 云台"]
     Flask -->|"GPIO13 PWM"| ESC["异物清理电调 / 风机"]
+    Lidar["YDLIDAR GS2 线阵雷达"] -->|"CP2102 USB 串口"| Flask
 ```
 
 主要功能：
@@ -25,6 +33,7 @@ flowchart LR
 - 拍照与 MP4 录像，文件保存在树莓派本地并可通过网页下载。
 - YOLOv8 普通检测框和 OBB 旋转框识别，识别框由浏览器 Canvas 叠加。
 - 基于 YOLO 孔洞位置的自动避障：直行、左螺旋、右螺旋。
+- YDLIDAR GS2 线阵激光雷达实时测距，提供 100° 扇形视场显示与串口状态。
 - 独立的 OpenCV 小异物识别：局部异常、边缘和背景变化多算法投票。
 - ROS2 底盘启停、手控/自动模式、速度、方向和底层风扇调速。
 - G1 云台 TCP 控制：抬头、低头、左转、右转、读取姿态和视角重置。
@@ -35,7 +44,7 @@ flowchart LR
 ## 目录结构
 
 ```text
-v1.1.0/
+v1.2.0/
 ├── app2.py                 # Flask 后端、视频、识别、ROS2、GPIO 和云台控制
 ├── templates/
 │   └── index1.html         # 浏览器控制界面（CSS/JavaScript 均内嵌）
@@ -73,6 +82,7 @@ def index():
 | 树莓派摄像头 | 由 `/opt/rpi-cam-stack/bin/rpicam-vid` 采集 |
 | 底盘控制器 | 由外部 ROS2 包 `basecontroller` 连接和控制 |
 | G1 云台 | 默认 IP `172.20.10.8`，TCP 控制端口 `8888` |
+| 线阵激光雷达 | YDLIDAR GS2；通过 CP2102 串口转接板和 Type-C 数据线连接树莓派 USB |
 | 异物清理电调 | BCM GPIO13，即物理 33 脚；50 Hz PWM |
 | 电调 PWM | 1000 us 为停止/最低油门，2000 us 为最高油门 |
 
@@ -95,6 +105,17 @@ v1.1.0 增加了 G1 默认模式维护机制。默认配置为 `G1_DEFAULT_MODE=
 模式维护不会执行周期性回中，只在模式查询或恢复时访问 G1；进行中的方向/俯仰/横滚动作会优先完成。程序退出、网页安全关机和清理流程都会停止该 watchdog。
 
 v1.1.0 同时加强了 G1 TCP 协议处理：请求会校验响应命令号并有限度忽略无关响应帧，设置模式后会再次查询确认；多进程部署时使用文件锁串行化 G1 TCP 通信。动作间隔默认缩短为 40 ms，Neutral 和动作完成后的默认等待均为 20 ms，如实机响应不稳定可通过环境变量调大这些值。
+
+### 4. 线阵激光雷达
+
+v1.2.0 集成 YDLIDAR GS2 串口协议。雷达接入 CP2102 串口转接板后，使用支持数据传输的 Type-C 线连接树莓派 USB 口。运行用户必须属于 `dialout` 组：
+
+```bash
+sudo usermod -aG dialout "$USER"
+# 注销并重新登录后生效
+```
+
+默认自动搜索 `/dev/serial/by-id/*`、`/dev/ttyUSB*` 和 `/dev/ttyACM*`，并依次探测 `230400`、`512000`、`921600`、`1500000` 波特率。当前实机验证使用 CP2102 的持久设备路径，通信波特率为 `921600`。状态接口为 `/api/lidar/status`。
 
 ## 软件依赖
 
@@ -119,7 +140,7 @@ GPIO 后端按系统选择安装。Raspberry Pi OS Bookworm 通常使用 `python
 ROS2 的 `rclpy` 通常由系统包提供，因此虚拟环境应保留系统包：
 
 ```bash
-cd "/path/to/v1.1.0"
+cd "/path/to/v1.2.0"
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -153,8 +174,8 @@ python -c "import rclpy; from geometry_msgs.msg import Twist; from std_msgs.msg 
 
 1. 环境变量 `MEDIAMTX_BIN`。
 2. 系统 `PATH` 中的 `mediamtx`。
-3. `v1.1.0/bin/mediamtx`。
-4. `v1.1.0/mediamtx`。
+3. `v1.2.0/bin/mediamtx`。
+4. `v1.2.0/mediamtx`。
 5. `/usr/local/bin/mediamtx` 或 `/usr/bin/mediamtx`。
 
 推荐将已验证版本的 ARM64 可执行文件放在 `bin/mediamtx`，并赋予执行权限：
@@ -269,6 +290,15 @@ ros2 run basecontroller basecontroller
 | `G1_NEUTRAL_SETTLE_SECONDS` | `0.02` | 云台动作前 Neutral 的等待时间，秒 |
 | `G1_POST_ACTION_SETTLE_SECONDS` | `0.02` | 云台动作完成后的等待时间，秒 |
 | `G1_AUTO_LOCK_MODE` | 不再读取 | v1.0.0 兼容配置名；v1.1.0 请使用 `G1_DEFAULT_MODE` 和 `G1_DEFAULT_MODE_ENABLED` |
+| `LIDAR_ENABLED` | `1` | 是否启用线阵雷达服务 |
+| `LIDAR_PORT` | `auto` | 串口设备路径；建议现场固定为 `/dev/serial/by-id/...` |
+| `LIDAR_BAUDRATE` | `230400` | 首选波特率；启用自动探测时会继续测试其他官方波特率 |
+| `LIDAR_AUTO_BAUD` | `1` | 是否自动探测 `230400/512000/921600/1500000` |
+| `LIDAR_MIN_RANGE_MM` | `25` | 前端和状态接口接受的最小测距 |
+| `LIDAR_MAX_RANGE_MM` | `300` | 前端扇形图最大测距 |
+| `LIDAR_CRITICAL_MM` | `80` | 近距危险阈值 |
+| `LIDAR_WARNING_MM` | `150` | 接近告警阈值 |
+| `LIDAR_SIMULATE` | `0` | 仅用于无硬件界面测试，实机必须保持关闭 |
 | `G1_YAW_DIRECTION` | `1` | 航向方向反向时设为 `-1` |
 | `G1_PITCH_DIRECTION` | `-1` | 俯仰方向反向时改为 `1` |
 | `DETECTION_BACKEND` | `yolov8` | 自动避障要求保持为 `yolov8` |
@@ -289,7 +319,7 @@ OpenCV 小异物识别还支持 `FOREIGN_DETECTION_MIN_AREA`、`FOREIGN_DETECTIO
 ## 启动
 
 ```bash
-cd "/path/to/v1.1.0"
+cd "/path/to/v1.2.0"
 source /opt/ros/<ros-distro>/setup.bash
 source /path/to/robot_ws/install/setup.bash
 source .venv/bin/activate
@@ -307,7 +337,7 @@ python app2.py
 http://<树莓派IP>:5000
 ```
 
-程序启动时会依次尝试初始化 GPIO 清理风机、网络地址监测、G1 默认模式 watchdog、MediaMTX/摄像头推流、YOLO 识别线程和 ROS2 节点。部分组件失败时 Flask 仍可能继续运行，应查看启动输出和 `/api/logs`，不能仅以网页能打开作为整机就绪依据。
+程序启动时会依次尝试初始化 GPIO 清理风机、网络地址监测、G1 默认模式 watchdog、MediaMTX/摄像头推流、YOLO 识别线程、ROS2 节点和线阵雷达。部分组件失败时 Flask 仍可能继续运行，应查看启动输出、`/api/logs` 和 `/api/lidar/status`，不能仅以网页能打开作为整机就绪依据。
 
 默认视频参数为 `1280x720 @ 15 FPS`。界面/API 支持：
 

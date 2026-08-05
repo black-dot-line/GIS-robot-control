@@ -1,8 +1,10 @@
 import atexit
+import glob
 import json
 import math
 import os
 import re
+import select
 import shlex
 import shutil
 import signal
@@ -12,8 +14,11 @@ import subprocess
 import threading
 import time
 import uuid
+from collections import deque
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 try:
     import fcntl
@@ -24,6 +29,716 @@ from urllib import request as ureq
 from urllib.parse import urljoin
 
 from flask import Flask, abort, jsonify, render_template, request, send_file
+
+try:
+    import termios
+except Exception:
+    termios = None
+
+
+# =========================
+# YDLIDAR GS2 串口测距（仅使用 Python 标准库）
+# =========================
+_GS2_HEADER = b"\xA5\xA5\xA5\xA5"
+_GS2_GET_ADDRESS = 0x60
+_GS2_GET_PARAMETERS = 0x61
+_GS2_SCAN = 0x63
+_GS2_STOP = 0x64
+_GS2_SCAN_PAYLOAD_BYTES = 322
+_GS2_POINT_COUNT = 160
+
+
+def _lidar_env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}
+
+
+def _lidar_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)), 0)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _lidar_env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+@dataclass(frozen=True)
+class LidarConfig:
+    enabled: bool = True
+    simulate: bool = False
+    port: str = "auto"
+    baudrate: int = 230400
+    auto_baud: bool = True
+    fov_degrees: float = 100.0
+    min_range_mm: float = 25.0
+    max_range_mm: float = 300.0
+    warning_mm: float = 150.0
+    critical_mm: float = 80.0
+    timeout_seconds: float = 0.25
+    reconnect_seconds: float = 1.0
+    stale_seconds: float = 1.0
+    simulate_hz: float = 12.0
+
+    @classmethod
+    def from_env(cls) -> "LidarConfig":
+        min_range = _lidar_env_float("LIDAR_MIN_RANGE_MM", 25.0, 1.0, 100000.0)
+        max_range = _lidar_env_float(
+            "LIDAR_MAX_RANGE_MM", 300.0, min_range + 1.0, 100000.0
+        )
+        critical = _lidar_env_float("LIDAR_CRITICAL_MM", 80.0, min_range, max_range)
+        warning = _lidar_env_float("LIDAR_WARNING_MM", 150.0, critical, max_range)
+        return cls(
+            enabled=_lidar_env_bool("LIDAR_ENABLED", True),
+            simulate=_lidar_env_bool("LIDAR_SIMULATE", False),
+            port=os.environ.get("LIDAR_PORT", "auto").strip() or "auto",
+            baudrate=_lidar_env_int("LIDAR_BAUDRATE", 230400, 1200, 4000000),
+            auto_baud=_lidar_env_bool("LIDAR_AUTO_BAUD", True),
+            fov_degrees=_lidar_env_float("LIDAR_FOV_DEGREES", 100.0, 1.0, 180.0),
+            min_range_mm=min_range,
+            max_range_mm=max_range,
+            warning_mm=warning,
+            critical_mm=critical,
+            timeout_seconds=_lidar_env_float("LIDAR_TIMEOUT_SECONDS", 0.25, 0.02, 5.0),
+            reconnect_seconds=_lidar_env_float("LIDAR_RECONNECT_SECONDS", 1.0, 0.1, 30.0),
+            stale_seconds=_lidar_env_float("LIDAR_STALE_SECONDS", 1.0, 0.1, 30.0),
+            simulate_hz=_lidar_env_float("LIDAR_SIMULATE_HZ", 12.0, 1.0, 60.0),
+        )
+
+
+class LidarSerialService:
+    """Read and decode YDLIDAR GS2 frames in a reconnecting background thread."""
+
+    def __init__(self, config: Optional[LidarConfig] = None):
+        self.config = config or LidarConfig.from_env()
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._serial_fd: Optional[int] = None
+        self._rx_buffer = bytearray()
+        self._calibration: Dict[int, Tuple[float, float, float, float, float]] = {}
+        self._frame_times = deque(maxlen=240)
+        self._state: Dict[str, Any] = {
+            "connected": False,
+            "port": "",
+            "points": [],
+            "frames_received": 0,
+            "parse_errors": 0,
+            "reconnects": 0,
+            "last_error": "",
+            "last_frame_wall": 0.0,
+            "last_frame_monotonic": 0.0,
+            "raw_preview": "",
+            "module_addresses": [],
+            "baudrate": self.config.baudrate,
+        }
+
+    @property
+    def running(self) -> bool:
+        thread = self._thread
+        return bool(thread and thread.is_alive())
+
+    def start(self) -> bool:
+        if not self.config.enabled:
+            return False
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                return True
+            self._stop_event.clear()
+            self._thread = threading.Thread(
+                target=self._worker,
+                name="ydlidar-gs2-reader",
+                daemon=True,
+            )
+            self._thread.start()
+        return True
+
+    def stop(self, timeout: float = 2.0) -> None:
+        self._stop_event.set()
+        thread = self._thread
+        if thread and thread is not threading.current_thread():
+            thread.join(max(0.0, timeout))
+
+        fd = self._serial_fd
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            self._serial_fd = None
+
+        with self._lock:
+            self._state["connected"] = False
+            self._thread = None
+
+    def _set_error(self, message: str, connected: bool = False) -> None:
+        with self._lock:
+            self._state["connected"] = connected
+            self._state["last_error"] = str(message or "")[:320]
+
+    def _note_parse_error(self, message: str) -> None:
+        with self._lock:
+            self._state["parse_errors"] = int(self._state["parse_errors"]) + 1
+            self._state["last_error"] = str(message or "")[:320]
+
+    def _discover_port(self) -> str:
+        if self.config.port.lower() != "auto":
+            return self.config.port
+
+        candidates: List[str] = []
+        for pattern in ("/dev/serial/by-id/*", "/dev/ttyUSB*", "/dev/ttyACM*"):
+            candidates.extend(glob.glob(pattern))
+        if not candidates:
+            return ""
+
+        # Prefer persistent by-id names and CP210x adapters used by the supplied board.
+        def sort_key(path: str) -> Tuple[int, int, str]:
+            lowered = path.lower()
+            return (
+                0 if "/by-id/" in lowered else 1,
+                0 if any(token in lowered for token in ("cp210", "silicon", "usb")) else 1,
+                lowered,
+            )
+
+        return sorted(set(candidates), key=sort_key)[0]
+
+    def _baud_constant(self, baudrate: int) -> int:
+        if termios is None:
+            raise RuntimeError("termios is unavailable; GS2 serial reading requires Linux")
+        value = getattr(termios, "B{}".format(baudrate), None)
+        if value is None:
+            raise RuntimeError("unsupported Linux serial baud rate: {}".format(baudrate))
+        return value
+
+    def _baud_candidates(self) -> List[int]:
+        values = [self.config.baudrate]
+        if self.config.auto_baud:
+            values.extend((230400, 512000, 921600, 1500000))
+        return list(dict.fromkeys(values))
+
+    def _open_serial(self, port: str, baudrate: int) -> int:
+        if termios is None:
+            raise RuntimeError("termios is unavailable; GS2 serial reading requires Linux")
+
+        fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        try:
+            attrs = termios.tcgetattr(fd)
+            attrs[0] = 0
+            attrs[1] = 0
+            attrs[2] = termios.CLOCAL | termios.CREAD | termios.CS8
+            attrs[3] = 0
+            attrs[4] = self._baud_constant(baudrate)
+            attrs[5] = self._baud_constant(baudrate)
+            attrs[6][termios.VMIN] = 0
+            attrs[6][termios.VTIME] = 0
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        except Exception:
+            os.close(fd)
+            raise
+        return fd
+
+    def _clear_input(self, fd: int) -> None:
+        self._rx_buffer.clear()
+        # Some CP2102-compatible adapter boards time out on the USB PURGE
+        # request generated by tcflush(). Drain pending bytes without issuing
+        # that control request so communication can continue on those boards.
+        while not self._stop_event.is_set():
+            try:
+                readable, _, _ = select.select([fd], [], [], 0)
+                if not readable:
+                    break
+                if not os.read(fd, 4096):
+                    break
+            except (BlockingIOError, OSError):
+                break
+
+    def _write_all(self, fd: int, data: bytes, timeout: float = 1.0) -> None:
+        view = memoryview(data)
+        deadline = time.monotonic() + timeout
+        while view:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("serial write timed out")
+            _, writable, _ = select.select([], [fd], [], remaining)
+            if not writable:
+                continue
+            try:
+                written = os.write(fd, view)
+            except BlockingIOError:
+                continue
+            if written <= 0:
+                raise OSError("serial device accepted no data")
+            view = view[written:]
+
+    def _send_command(self, fd: int, command: int, payload: bytes = b"", address: int = 0) -> None:
+        size = len(payload)
+        packet = bytearray(_GS2_HEADER)
+        packet.extend((address & 0xFF, command & 0xFF, size & 0xFF, (size >> 8) & 0xFF))
+        packet.extend(payload)
+        packet.append(sum(packet[4:]) & 0xFF)
+        self._write_all(fd, bytes(packet))
+
+    def _fill_buffer(self, fd: int, deadline: float) -> bool:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or self._stop_event.is_set():
+            return False
+        readable, _, _ = select.select([fd], [], [], remaining)
+        if not readable:
+            return False
+        try:
+            chunk = os.read(fd, 4096)
+        except BlockingIOError:
+            return True
+        if not chunk:
+            raise OSError("serial device disconnected")
+        self._rx_buffer.extend(chunk)
+        return True
+
+    def _read_packet(
+        self, fd: int, timeout: float
+    ) -> Optional[Tuple[int, int, bytes]]:
+        deadline = time.monotonic() + max(0.0, timeout)
+        while not self._stop_event.is_set():
+            header_index = self._rx_buffer.find(_GS2_HEADER)
+            if header_index < 0:
+                if len(self._rx_buffer) > len(_GS2_HEADER) - 1:
+                    del self._rx_buffer[: -(len(_GS2_HEADER) - 1)]
+                if not self._fill_buffer(fd, deadline):
+                    return None
+                continue
+            if header_index:
+                del self._rx_buffer[:header_index]
+
+            while len(self._rx_buffer) < 8:
+                if not self._fill_buffer(fd, deadline):
+                    return None
+
+            size = self._rx_buffer[6] | (self._rx_buffer[7] << 8)
+            if size > 4096:
+                del self._rx_buffer[0]
+                self._note_parse_error("GS2 frame length is invalid: {}".format(size))
+                continue
+
+            frame_size = 9 + size
+            while len(self._rx_buffer) < frame_size:
+                if not self._fill_buffer(fd, deadline):
+                    return None
+
+            frame = bytes(self._rx_buffer[:frame_size])
+            del self._rx_buffer[:frame_size]
+            expected = sum(frame[4:-1]) & 0xFF
+            if frame[-1] != expected:
+                self._note_parse_error(
+                    "GS2 checksum mismatch: received {:02X}, expected {:02X}".format(
+                        frame[-1], expected
+                    )
+                )
+                continue
+            return frame[4], frame[5], frame[8:-1]
+        return None
+
+    def _collect_responses(
+        self,
+        fd: int,
+        packet_type: int,
+        timeout: float,
+        payload_size: Optional[int] = None,
+        expected_addresses: Optional[Sequence[int]] = None,
+        stop_after_first: bool = False,
+    ) -> Dict[int, bytes]:
+        responses: Dict[int, bytes] = {}
+        expected = set(expected_addresses or [])
+        deadline = time.monotonic() + timeout
+        while not self._stop_event.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            packet = self._read_packet(fd, remaining)
+            if packet is None:
+                break
+            address, current_type, payload = packet
+            if current_type != packet_type:
+                continue
+            if payload_size is not None and len(payload) != payload_size:
+                continue
+            responses[address] = payload
+            if stop_after_first:
+                break
+            if expected and expected.issubset(responses):
+                break
+        return responses
+
+    def _initialize_gs2(self, fd: int) -> None:
+        self._clear_input(fd)
+        self._send_command(fd, _GS2_GET_ADDRESS)
+        address_packets = self._collect_responses(
+            fd, _GS2_GET_ADDRESS, timeout=0.9, payload_size=0
+        )
+        addresses = sorted(address for address in address_packets if address in (0x01, 0x02, 0x04))
+        if not addresses:
+            raise RuntimeError("GS2 did not answer the address command")
+
+        self._clear_input(fd)
+        self._send_command(fd, _GS2_GET_PARAMETERS)
+        parameter_packets = self._collect_responses(
+            fd,
+            _GS2_GET_PARAMETERS,
+            timeout=max(0.4, 0.25 * len(addresses)),
+            payload_size=9,
+            expected_addresses=addresses,
+        )
+        missing = [address for address in addresses if address not in parameter_packets]
+        if missing:
+            raise RuntimeError(
+                "GS2 calibration response missing for address(es): {}".format(
+                    ", ".join("0x{:02X}".format(address) for address in missing)
+                )
+            )
+
+        calibration: Dict[int, Tuple[float, float, float, float, float]] = {}
+        for address, payload in parameter_packets.items():
+            k0, b0, k1, b1, bias = struct.unpack("<HHHHb", payload)
+            calibration[address] = (
+                k0 / 10000.0,
+                b0 / 10000.0,
+                k1 / 10000.0,
+                b1 / 10000.0,
+                bias / 10.0,
+            )
+        self._calibration = calibration
+
+        self._clear_input(fd)
+        self._send_command(fd, _GS2_SCAN)
+        scan_ack = self._collect_responses(
+            fd, _GS2_SCAN, timeout=0.5, payload_size=0, stop_after_first=True
+        )
+        if not scan_ack:
+            raise RuntimeError("GS2 did not acknowledge the scan command")
+
+        with self._lock:
+            self._state["module_addresses"] = addresses
+
+    @staticmethod
+    def _normalize_angle(angle: float) -> float:
+        while angle > 180.0:
+            angle -= 360.0
+        while angle <= -180.0:
+            angle += 360.0
+        return angle
+
+    def _transform_point(
+        self,
+        address: int,
+        sample_index: int,
+        raw_distance: int,
+        strength: int,
+    ) -> Optional[Dict[str, float]]:
+        values = self._calibration.get(address)
+        if values is None or raw_distance <= 0:
+            return None
+
+        k0, b0, k1, b1, bias = values
+        pixel_u = float(sample_index)
+        mounting_angle = 22.5 + bias
+
+        try:
+            if sample_index < 80:
+                pixel_u = 80.0 - pixel_u
+                temp_theta = (
+                    k0 * pixel_u - b0
+                    if b0 > 1.0
+                    else math.degrees(math.atan(k0 * pixel_u - b0))
+                )
+                temp_dist = (raw_distance - 1.22) / math.cos(
+                    math.radians(mounting_angle - temp_theta)
+                )
+                theta_radians = math.radians(temp_theta)
+                mounting_radians = math.radians(mounting_angle)
+                temp_x = (
+                    math.cos(mounting_radians) * temp_dist * math.cos(theta_radians)
+                    + math.sin(mounting_radians) * temp_dist * math.sin(theta_radians)
+                    + 1.22
+                )
+                temp_y = (
+                    -math.sin(mounting_radians) * temp_dist * math.cos(theta_radians)
+                    + math.cos(mounting_radians) * temp_dist * math.sin(theta_radians)
+                    - 5.315
+                )
+            else:
+                pixel_u = 160.0 - pixel_u
+                temp_theta = (
+                    k1 * pixel_u - b1
+                    if b1 > 1.0
+                    else math.degrees(math.atan(k1 * pixel_u - b1))
+                )
+                temp_dist = (raw_distance - 1.22) / math.cos(
+                    math.radians(mounting_angle + temp_theta)
+                )
+                theta_radians = math.radians(temp_theta)
+                mounting_radians = math.radians(-mounting_angle)
+                temp_x = (
+                    math.cos(mounting_radians) * temp_dist * math.cos(theta_radians)
+                    + math.sin(mounting_radians) * temp_dist * math.sin(theta_radians)
+                    + 1.22
+                )
+                temp_y = (
+                    -math.sin(mounting_radians) * temp_dist * math.cos(theta_radians)
+                    + math.cos(mounting_radians) * temp_dist * math.sin(theta_radians)
+                    + 5.315
+                )
+        except (OverflowError, ValueError, ZeroDivisionError):
+            return None
+
+        distance = math.hypot(temp_x, temp_y)
+        angle = self._normalize_angle(math.degrees(math.atan2(temp_y, temp_x)))
+        if not math.isfinite(distance) or not math.isfinite(angle):
+            return None
+
+        # The first 80 samples belong to the left camera and the rest to the right.
+        if (sample_index < 80 and angle > 0.001) or (sample_index >= 80 and angle < -0.001):
+            return None
+        if abs(angle) > self.config.fov_degrees / 2.0 + 0.5:
+            return None
+        if not (self.config.min_range_mm <= distance <= self.config.max_range_mm):
+            return None
+        return {
+            "angle_deg": round(angle, 3),
+            "distance_mm": round(distance, 3),
+            "strength": float(strength),
+        }
+
+    def _decode_scan(self, address: int, payload: bytes) -> List[Dict[str, float]]:
+        if len(payload) != _GS2_SCAN_PAYLOAD_BYTES:
+            raise ValueError("GS2 scan payload must contain 322 bytes")
+        if address not in self._calibration:
+            raise ValueError("GS2 scan used an unknown module address 0x{:02X}".format(address))
+
+        points: List[Dict[str, float]] = []
+        for index in range(_GS2_POINT_COUNT):
+            offset = 2 + index * 2
+            sample = payload[offset] | (payload[offset + 1] << 8)
+            point = self._transform_point(
+                address,
+                index,
+                sample & 0x01FF,
+                sample >> 9,
+            )
+            if point is not None:
+                points.append(point)
+        return sorted(points, key=lambda item: item["angle_deg"])
+
+    def _store_frame(self, points: List[Dict[str, float]], address: int, payload: bytes) -> None:
+        now_monotonic = time.monotonic()
+        now_wall = time.time()
+        environment = payload[0] | (payload[1] << 8)
+        with self._lock:
+            self._frame_times.append(now_monotonic)
+            self._state.update(
+                {
+                    "connected": True,
+                    "points": [dict(point) for point in points],
+                    "frames_received": int(self._state["frames_received"]) + 1,
+                    "last_error": "",
+                    "last_frame_wall": now_wall,
+                    "last_frame_monotonic": now_monotonic,
+                    "raw_preview": "GS2 addr=0x{:02X} env={} points={}".format(
+                        address, environment, len(points)
+                    ),
+                }
+            )
+
+    def _scan_loop(self, fd: int) -> None:
+        while not self._stop_event.is_set():
+            packet = self._read_packet(fd, self.config.timeout_seconds)
+            if packet is None:
+                continue
+            address, packet_type, payload = packet
+            if packet_type != _GS2_SCAN or len(payload) != _GS2_SCAN_PAYLOAD_BYTES:
+                continue
+            try:
+                points = self._decode_scan(address, payload)
+            except ValueError as exc:
+                self._note_parse_error(str(exc))
+                continue
+            self._store_frame(points, address, payload)
+
+    def _simulate_loop(self) -> None:
+        with self._lock:
+            self._state.update(
+                {
+                    "connected": True,
+                    "port": "simulation",
+                    "last_error": "",
+                    "module_addresses": [1],
+                }
+            )
+        interval = 1.0 / self.config.simulate_hz
+        while not self._stop_event.is_set():
+            phase = time.monotonic()
+            points: List[Dict[str, float]] = []
+            for index in range(_GS2_POINT_COUNT):
+                angle = -50.0 + 100.0 * index / float(_GS2_POINT_COUNT - 1)
+                background = self.config.max_range_mm * (
+                    0.77 + 0.08 * math.sin(phase + angle * 0.08)
+                )
+                obstacle_angle = 25.0 * math.sin(phase * 0.32)
+                obstacle = self.config.critical_mm * 0.82 + abs(angle - obstacle_angle) * 4.2
+                distance = min(background, obstacle)
+                if self.config.min_range_mm <= distance <= self.config.max_range_mm:
+                    points.append(
+                        {
+                            "angle_deg": round(angle, 3),
+                            "distance_mm": round(distance, 3),
+                            "strength": 64.0,
+                        }
+                    )
+            payload = bytes(2 + _GS2_POINT_COUNT * 2)
+            self._store_frame(points, 1, payload)
+            self._stop_event.wait(interval)
+
+    def _worker(self) -> None:
+        if self.config.simulate:
+            self._simulate_loop()
+            return
+
+        while not self._stop_event.is_set():
+            port = self._discover_port()
+            if not port:
+                self._set_error("no USB serial lidar found")
+                self._stop_event.wait(self.config.reconnect_seconds)
+                continue
+
+            for baudrate in self._baud_candidates():
+                if self._stop_event.is_set():
+                    break
+                fd: Optional[int] = None
+                scanning = False
+                try:
+                    fd = self._open_serial(port, baudrate)
+                    self._serial_fd = fd
+                    self._rx_buffer.clear()
+                    with self._lock:
+                        self._state.update(
+                            {"port": port, "baudrate": baudrate, "last_error": ""}
+                        )
+                    self._initialize_gs2(fd)
+                    scanning = True
+                    with self._lock:
+                        self._state["connected"] = True
+                    self._scan_loop(fd)
+                except Exception as exc:
+                    self._set_error(
+                        "{} at {} baud: {}".format(port, baudrate, exc)
+                    )
+                finally:
+                    if fd is not None:
+                        if scanning:
+                            try:
+                                self._send_command(fd, _GS2_STOP)
+                            except Exception:
+                                pass
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
+                    self._serial_fd = None
+                    self._rx_buffer.clear()
+                    self._calibration.clear()
+                    with self._lock:
+                        self._state["connected"] = False
+                        self._state["reconnects"] = int(self._state["reconnects"]) + 1
+                if scanning:
+                    break
+            self._stop_event.wait(self.config.reconnect_seconds)
+
+    def get_status(self) -> Dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            state = dict(self._state)
+            points = [dict(point) for point in self._state["points"]]
+            frame_times = list(self._frame_times)
+
+        last_frame = float(state["last_frame_monotonic"] or 0.0)
+        frame_age = max(0.0, now - last_frame) if last_frame else None
+        stale = frame_age is None or frame_age > self.config.stale_seconds
+        recent = [stamp for stamp in frame_times if now - stamp <= 2.0]
+        frame_rate = 0.0
+        if len(recent) >= 2:
+            duration = max(0.001, recent[-1] - recent[0])
+            frame_rate = (len(recent) - 1) / duration
+
+        nearest = min(points, key=lambda item: item["distance_mm"]) if points and not stale else None
+        if nearest is None:
+            direction = "none"
+            risk = "unavailable"
+        else:
+            angle = nearest["angle_deg"]
+            direction = "left" if angle < -8.0 else "right" if angle > 8.0 else "center"
+            distance = nearest["distance_mm"]
+            risk = (
+                "critical"
+                if distance <= self.config.critical_mm
+                else "warning"
+                if distance <= self.config.warning_mm
+                else "clear"
+            )
+
+        if not self.config.enabled:
+            status = "disabled"
+        elif self.config.simulate and self.running:
+            status = "simulated"
+        elif state["connected"] and stale:
+            status = "stale"
+        elif state["connected"]:
+            status = "connected"
+        elif state["last_error"]:
+            status = "error"
+        else:
+            status = "connecting" if self.running else "stopped"
+
+        return {
+            "enabled": self.config.enabled,
+            "running": self.running,
+            "simulated": self.config.simulate,
+            "status": status,
+            "connected": bool(state["connected"]),
+            "data_valid": bool(nearest),
+            "stale": stale,
+            "port": state["port"],
+            "configured_port": self.config.port,
+            "baudrate": int(state["baudrate"]),
+            "auto_baud": self.config.auto_baud,
+            "protocol": "ydlidar-gs2",
+            "fov_degrees": self.config.fov_degrees,
+            "min_range_mm": self.config.min_range_mm,
+            "max_range_mm": self.config.max_range_mm,
+            "warning_mm": self.config.warning_mm,
+            "critical_mm": self.config.critical_mm,
+            "points": points if not stale else [],
+            "point_count": len(points) if not stale else 0,
+            "nearest": dict(nearest) if nearest else None,
+            "nearest_direction": direction,
+            "risk": risk,
+            "frame_rate_hz": round(frame_rate, 2),
+            "frame_age_seconds": round(frame_age, 3) if frame_age is not None else None,
+            "frames_received": int(state["frames_received"]),
+            "parse_errors": int(state["parse_errors"]),
+            "reconnects": int(state["reconnects"]),
+            "last_frame_at": float(state["last_frame_wall"] or 0.0),
+            "last_error": state["last_error"],
+            "raw_preview": state["raw_preview"],
+            "module_addresses": list(state["module_addresses"]),
+        }
 
 try:
     from gpiozero import PWMOutputDevice
@@ -93,6 +808,7 @@ RECORDING_LOG_PATH = RUNTIME_DIR / "recording.log"
 BASECONTROLLER_LOG_PATH = RUNTIME_DIR / "basecontroller.log"
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
+lidar_service = LidarSerialService()
 
 
 # =========================
@@ -6263,6 +6979,7 @@ def api_status():
     stream_error = build_stream_error_text()
     gimbal = g1_get_public_status(refresh_pose=False)
     avoidance = get_obstacle_avoidance_state()
+    lidar = lidar_service.get_status()
 
     return jsonify({
         "ok": True,
@@ -6321,7 +7038,13 @@ def api_status():
         "published_mode_value": int(robot_state["published_mode_value"]),
         "controller_state": get_controller_state_payload(),
         "basecontroller_error": last_basecontroller_error,
+        "lidar": lidar,
     })
+
+
+@app.route("/api/lidar/status", methods=["GET"])
+def api_lidar_status():
+    return jsonify({"ok": True, **lidar_service.get_status()})
 
 
 @app.route("/api/system_status", methods=["GET"])
@@ -7240,6 +7963,10 @@ def api_shutdown():
             shutdown_ros()
         except Exception:
             pass
+        try:
+            lidar_service.stop()
+        except Exception:
+            pass
 
         time.sleep(1)
         os.system("sudo shutdown -h now")
@@ -7295,6 +8022,10 @@ def shutdown_legacy():
             shutdown_ros()
         except Exception:
             pass
+        try:
+            lidar_service.stop()
+        except Exception:
+            pass
         time.sleep(1)
         os.system("sudo halt")
 
@@ -7306,6 +8037,10 @@ def shutdown_legacy():
 # 退出清理
 # =========================
 def cleanup():
+    try:
+        lidar_service.stop()
+    except Exception:
+        pass
     try:
         stop_obstacle_avoidance_worker()
     except Exception:
@@ -7385,6 +8120,20 @@ if __name__ == "__main__":
         print("[INFO] Cleaning fan initialized")
     except Exception as e:
         print(f"[WARN] Cleaning fan init failed: {e}")
+
+    try:
+        lidar_service.start()
+        lidar = lidar_service.get_status()
+        print(
+            "[INFO] Line lidar    : port={} baud={} protocol={}{}".format(
+                lidar["configured_port"],
+                lidar["baudrate"],
+                lidar["protocol"],
+                " (simulation)" if lidar["simulated"] else "",
+            )
+        )
+    except Exception as e:
+        print(f"[WARN] Line lidar start failed: {e}")
 
     print(f"[INFO] Local access : http://127.0.0.1:{PORT}")
     print(f"[INFO] LAN access   : http://{get_ip_address()}:{PORT}")
