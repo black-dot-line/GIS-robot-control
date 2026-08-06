@@ -1,4 +1,4 @@
-# GIS 管内壁爬行机器人控制端（v1.3.0）
+# GIS 管内壁爬行机器人控制端（v1.3.1）
 
 本目录是运行在树莓派上的机器人上位控制程序。系统通过浏览器提供低延迟视频、底盘运动、自动避障、线阵激光测距、异物识别与清理、G1 云台、拍照录像和安全关机等功能。
 
@@ -12,6 +12,12 @@
 - 前端明确显示“4K USB 摄像头实时画面”，并保留 `v1.2.0` 的完整雷达扇形图及六按钮 `3 x 2` 布局。
 - 本版本不包含摄像头或 G1 云台的目标自动跟随；云台仍由现有手动控制和默认模式 watchdog 管理。
 - 保持原部署结构，在树莓派上仍只需替换 `app2.py` 和 `templates/index1.html`。
+
+## v1.3.1 布局修正
+
+- 基于 `v1.3.0`，后端 `app2.py`、4K 摄像头、雷达协议和按钮功能均保持不变。
+- 桌面端视频下方工作区将线阵激光雷达和六个按钮区域调整为各约 50% 宽度，继续保持 `3 x 2` 排列。
+- 移动端仍使用雷达在上、按钮在下的纵向布局，保证触屏操作和扇形图显示不受影响。
 
 ## 系统组成
 
@@ -46,7 +52,7 @@ flowchart LR
 ## 目录结构
 
 ```text
-v1.3.0/
+v1.3.1/
 ├── app2.py                 # Flask 后端、视频、识别、ROS2、GPIO 和云台控制
 ├── templates/
 │   └── index1.html         # 浏览器控制界面（CSS/JavaScript 均内嵌）
@@ -156,7 +162,7 @@ GPIO 后端按系统选择安装。Raspberry Pi OS Bookworm 通常使用 `python
 ROS2 的 `rclpy` 通常由系统包提供，因此虚拟环境应保留系统包：
 
 ```bash
-cd "/path/to/v1.3.0"
+cd "/path/to/v1.3.1"
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -190,8 +196,8 @@ python -c "import rclpy; from geometry_msgs.msg import Twist; from std_msgs.msg 
 
 1. 环境变量 `MEDIAMTX_BIN`。
 2. 系统 `PATH` 中的 `mediamtx`。
-3. `v1.3.0/bin/mediamtx`。
-4. `v1.3.0/mediamtx`。
+3. `v1.3.1/bin/mediamtx`。
+4. `v1.3.1/mediamtx`。
 5. `/usr/local/bin/mediamtx` 或 `/usr/bin/mediamtx`。
 
 推荐将已验证版本的 ARM64 可执行文件放在 `bin/mediamtx`，并赋予执行权限：
@@ -343,7 +349,7 @@ OpenCV 小异物识别还支持 `FOREIGN_DETECTION_MIN_AREA`、`FOREIGN_DETECTIO
 ## 启动
 
 ```bash
-cd "/path/to/v1.3.0"
+cd "/path/to/v1.3.1"
 source /opt/ros/<ros-distro>/setup.bash
 source /path/to/robot_ws/install/setup.bash
 source .venv/bin/activate
